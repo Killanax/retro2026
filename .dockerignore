@@ -1,0 +1,8 @@
+node_modules/
+retro.db
+logs/
+*.log
+.env
+.DS_Store
+fly.toml
+Dockerfile
