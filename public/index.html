@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RetroBoard - Scrum Ретроспективы</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Главная страница -->
+  <div id="home-page" class="page">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+      <div class="container">
+        <a class="navbar-brand fw-bold" href="#">
+          <span class="material-icons me-2">retrospective</span>
+          RetroBoard
+        </a>
+      </div>
+    </nav>
+    
+    <div class="container mt-5">
+      <div class="row justify-content-center">
+        <div class="col-md-8">
+          <div class="card shadow-lg border-0">
+            <div class="card-body p-5">
+              <h1 class="text-center mb-4">🎯 Scrum Ретроспектива</h1>
+              <p class="text-center text-muted mb-4">
+                Проводите эффективные ретроспективы с вашей командой в реальном времени
+              </p>
+              
+              <ul class="nav nav-tabs mb-4" role="tablist">
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#create-tab">
+                    <span class="material-icons me-1">add_circle</span>
+                    Создать
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link" data-bs-toggle="tab" data-bs-target="#join-tab">
+                    <span class="material-icons me-1">login</span>
+                    Присоединиться
+                  </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link" data-bs-toggle="tab" data-bs-target="#history-tab" onclick="loadHistory()">
+                    <span class="material-icons me-1">history</span>
+                    История
+                  </button>
+                </li>
+              </ul>
+              
+              <div class="tab-content">
+                <!-- Создание новой сессии -->
+                <div class="tab-pane fade show active" id="create-tab">
+                  <form id="create-session-form">
+                    <div class="mb-3">
+                      <label class="form-label">Название ретроспективы</label>
+                      <input type="text" class="form-control" id="session-name" placeholder="Например: Спринт 24" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <label class="form-label">Ваше имя (ведущий)</label>
+                      <input type="text" class="form-control" id="admin-name" placeholder="Имя ведущего" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <label class="form-label">Шаблон</label>
+                      <select class="form-select" id="session-template">
+                        <option value="classic">Классический (Start, Stop, Continue)</option>
+                        <option value="mad-sad-glad">Mad, Sad, Glad</option>
+                        <option value="good-bad-ideas">Good, Bad, Ideas</option>
+                        <option value="kiss">KISS (Keep, Improve, Start, Stop)</option>
+                        <option value="sailboat">Sailboat (Парусник)</option>
+                        <option value="freeform">Свободный формат</option>
+                      </select>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary w-100 py-2">
+                      <span class="material-icons me-1 align-middle">rocket_launch</span>
+                      Создать сессию
+                    </button>
+                  </form>
+                </div>
+                
+                <!-- Присоединение к сессии -->
+                <div class="tab-pane fade" id="join-tab">
+                  <form id="join-session-form">
+                    <div class="mb-3" id="join-session-id-container">
+                      <label class="form-label">ID сессии</label>
+                      <input type="text" class="form-control" id="join-session-id" placeholder="Введите ID сессии или используйте ссылку" required>
+                      <small class="text-muted">Или перейдите по ссылке: yoursite.com/?session=ID</small>
+                    </div>
+
+                    <div class="mb-3">
+                      <label class="form-label">Ваше имя</label>
+                      <input type="text" class="form-control" id="join-name" placeholder="Как вас называть" required>
+                    </div>
+
+                    <button type="submit" class="btn btn-success w-100 py-2">
+                      <span class="material-icons me-1 align-middle">login</span>
+                      <span id="join-btn-text">Войти в сессию</span>
+                    </button>
+                  </form>
+                </div>
+                
+                <!-- История сессий -->
+                <div class="tab-pane fade" id="history-tab">
+                  <div id="history-list" class="list-group">
+                    <div class="text-center text-muted py-4">Загрузка...</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно просмотра сессии -->
+  <div class="modal fade" id="viewSessionModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Просмотр сессии</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <h6>Итоги ретроспективы</h6>
+          <div id="session-summary-view" class="mb-3 p-3 bg-light rounded">
+            <p class="text-muted mb-0">Нет итогов</p>
+          </div>
+          
+          <h6>План действий</h6>
+          <div id="session-actions-view" class="mb-3 p-3 bg-light rounded">
+            <p class="text-muted mb-0">Нет плана действий</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-danger me-auto" id="delete-session-btn" onclick="deleteCurrentSession()">Удалить сессию</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Страница сессии -->
+  <div id="session-page" class="page d-none">
+    <nav class="navbar navbar-dark bg-primary">
+      <div class="container-fluid">
+        <div class="d-flex align-items-center">
+          <button class="btn btn-link text-white me-2" onclick="goHome()">
+            <span class="material-icons">arrow_back</span>
+          </button>
+          <div>
+            <h5 class="mb-0" id="session-title">Название сессии</h5>
+            <small class="text-white-50" id="session-info">Шаблон • Статус</small>
+          </div>
+        </div>
+        
+        <div class="d-flex align-items-center gap-3">
+          <!-- Смайлы настроения -->
+          <div class="mood-selector" id="mood-selector-container">
+            <div class="mood-item">
+              <span class="mood-btn" data-mood="happy" title="Радостный">😄</span>
+              <span class="mood-count" id="mood-count-happy">0</span>
+            </div>
+            <div class="mood-item">
+              <span class="mood-btn" data-mood="smile" title="Улыбающийся">😊</span>
+              <span class="mood-count" id="mood-count-smile">0</span>
+            </div>
+            <div class="mood-item">
+              <span class="mood-btn" data-mood="neutral" title="Нейтральный">😐</span>
+              <span class="mood-count" id="mood-count-neutral">0</span>
+            </div>
+            <div class="mood-item">
+              <span class="mood-btn" data-mood="tired" title="Усталый">😫</span>
+              <span class="mood-count" id="mood-count-tired">0</span>
+            </div>
+            <div class="mood-item">
+              <span class="mood-btn" data-mood="dead" title="Почти умер">💀</span>
+              <span class="mood-count" id="mood-count-dead">0</span>
+            </div>
+          </div>
+          
+          <div id="timer-container"></div>
+          
+          <div class="text-white" style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 8px;">
+            <small>ID: </small><strong id="session-id-display">-</strong>
+            <button class="btn btn-sm btn-link text-white ms-1" onclick="copySessionId()" title="Копировать ID">
+              <span class="material-icons" style="font-size: 16px;">content_copy</span>
+            </button>
+          </div>
+          
+          <div class="text-white" style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 8px;" id="admin-votes-control" title="Лимит голосов" style="display:none;">
+            <small>Голосов: </small>
+            <input type="number" id="vote-limit-input" class="form-control form-control-sm d-inline-block"
+                   style="width: 60px; display: inline-block; padding: 2px 6px; font-size: 0.875rem;"
+                   value="5" min="1" max="100" onchange="updateVoteLimit(this.value)" title="Установить лимит голосов">
+          </div>
+          <div class="text-white-50" id="vote-limit-display" style="display:none;">
+            <small>Голосов: <strong id="vote-limit-value">5</strong></small>
+          </div>
+          <span class="text-white" id="user-display"></span>
+          <button class="btn btn-outline-light btn-sm" id="admin-panel-btn" onclick="toggleAdminPanel()" style="display:none;">
+            <span class="material-icons">admin_panel_settings</span>
+            Админ
+          </button>
+          <button class="btn btn-outline-light btn-sm" id="end-session-btn" onclick="endSession()" style="display:none;">
+            <span class="material-icons">check_circle</span>
+            Завершить
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container-fluid mt-3">
+      <div class="row">
+        <!-- Список участников -->
+        <div class="col-12 mb-3">
+          <div class="card shadow-sm">
+            <div class="card-body py-2">
+              <h6 class="card-title mb-2">
+                <span class="material-icons" style="font-size: 18px; vertical-align: middle;">group</span>
+                Участники сессии
+              </h6>
+              <div class="participants-list" id="participants-list">
+                <span class="text-muted">Загрузка...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Колонки с категориями -->
+        <div class="col" id="columns-container">
+          <!-- Колонки будут добавлены динамически -->
+        </div>
+        
+        <!-- Панель администратора -->
+        <div class="col-md-3" id="admin-panel" style="display:none;">
+          <div class="card shadow-sm">
+            <div class="card-header bg-warning text-dark">
+              <span class="material-icons align-middle">admin_panel_settings</span>
+              Панель ведущего
+            </div>
+            <div class="card-body">
+              <h6 class="card-title">Управление шаблоном</h6>
+              <select class="form-select mb-3" id="admin-template-select" onchange="changeTemplate()">
+                <option value="classic">Классический</option>
+                <option value="mad-sad-glad">Mad, Sad, Glad</option>
+                <option value="good-bad-ideas">Good, Bad, Ideas</option>
+                <option value="kiss">KISS</option>
+                <option value="sailboat">Парусник</option>
+                <option value="freeform">Свободный</option>
+              </select>
+              
+              <h6 class="card-title">Модерация</h6>
+              <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="allow-memes" checked>
+                <label class="form-check-label">Разрешить мемы</label>
+              </div>
+              <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" id="allow-emoji" checked>
+                <label class="form-check-label">Разрешить смайлы</label>
+              </div>
+              <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" id="voting-enabled" checked>
+                <label class="form-check-label">Голосование</label>
+              </div>
+              
+              <h6 class="card-title">Экспорт</h6>
+              <button class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="exportResults('json')">
+                <span class="material-icons align-middle">download</span>
+                JSON
+              </button>
+              <button class="btn btn-outline-primary btn-sm w-100" onclick="exportResults('pdf')">
+                <span class="material-icons align-middle">picture_as_pdf</span>
+                PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Модальное окно добавления идеи -->
+  <div class="modal fade" id="addItemModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Добавить элемент</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <form id="add-item-form" onsubmit="event.preventDefault(); submitItem();">
+            <input type="hidden" id="item-category">
+            
+            <ul class="nav nav-tabs mb-3" role="tablist">
+              <li class="nav-item">
+                <button class="nav-link active" type="button" data-bs-toggle="tab" data-bs-target="#tab-text">
+                  <span class="material-icons">text_fields</span>
+                  Текст
+                </button>
+              </li>
+              <li class="nav-item">
+                <button class="nav-link" type="button" data-bs-toggle="tab" data-bs-target="#tab-meme">
+                  <span class="material-icons">image</span>
+                  Мем
+                </button>
+              </li>
+              <li class="nav-item">
+                <button class="nav-link" type="button" data-bs-toggle="tab" data-bs-target="#tab-emoji">
+                  <span class="material-icons">sentiment_satisfied</span>
+                  Смайлы
+                </button>
+              </li>
+            </ul>
+            
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="tab-text">
+                <textarea class="form-control" id="item-text" rows="4" placeholder="Ваша идея..."></textarea>
+                
+                <!-- Быстрая вставка смайлов -->
+                <label class="form-label mt-2">Вставить смайл:</label>
+                <div class="emoji-picker-inline">
+                  <span class="emoji-btn" onclick="insertEmoji('👍')">👍</span>
+                  <span class="emoji-btn" onclick="insertEmoji('👎')">👎</span>
+                  <span class="emoji-btn" onclick="insertEmoji('✅')">✅</span>
+                  <span class="emoji-btn" onclick="insertEmoji('❌')">❌</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🎉')">🎉</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🔥')">🔥</span>
+                  <span class="emoji-btn" onclick="insertEmoji('💡')">💡</span>
+                  <span class="emoji-btn" onclick="insertEmoji('⭐')">⭐</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🚀')">🚀</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😄')">😄</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😢')">😢</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😡')">😡</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🤔')">🤔</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🎯')">🎯</span>
+                  <span class="emoji-btn" onclick="insertEmoji('💪')">💪</span>
+                  <span class="emoji-btn" onclick="insertEmoji('❤️')">❤️</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😍')">😍</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🤣')">🤣</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😮')">😮</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😱')">😱</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🙄')">🙄</span>
+                  <span class="emoji-btn" onclick="insertEmoji('💩')">💩</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🙏')">🙏</span>
+                  <span class="emoji-btn" onclick="insertEmoji('📈')">📈</span>
+                </div>
+
+                <!-- Быстрая вставка мемов -->
+                <label class="form-label mt-3">Вставить мем:</label>
+                <div class="meme-preview-container" id="text-tab-memes-container">
+                  <img src="https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh" class="meme-preview" onclick="insertMeme('https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh', 'Meme')" title="Meme">
+                </div>
+                <button type="button" class="btn btn-primary btn-sm mt-2" onclick="openAddMemeModal()">
+                  <span class="material-icons" style="font-size: 16px; vertical-align: middle;">add</span>
+                  Добавить мем
+                </button>
+              </div>
+
+              <div class="tab-pane fade" id="tab-meme">
+                <div class="mb-3">
+                  <label class="form-label">URL изображения</label>
+                  <input type="text" class="form-control" id="item-meme-url" placeholder="https://...">
+                </div>
+                <div class="text-center">
+                  <label class="form-label d-block mb-2">Быстрые мемы:</label>
+                  <div class="btn-group flex-wrap gap-1 mb-2" id="quick-memes-container">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="selectMeme('https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh')">Meme</button>
+                  </div>
+                  <button type="button" class="btn btn-primary btn-sm" onclick="openAddMemeModal()">
+                    <span class="material-icons" style="font-size: 16px; vertical-align: middle;">add</span>
+                    Добавить мем
+                  </button>
+                </div>
+              </div>
+
+              <div class="tab-pane fade" id="tab-emoji">
+                <label class="form-label">Выберите смайл:</label>
+                <div class="emoji-grid">
+                  <span class="emoji-btn" onclick="selectEmoji('👍')">👍</span>
+                  <span class="emoji-btn" onclick="selectEmoji('👎')">👎</span>
+                  <span class="emoji-btn" onclick="selectEmoji('✅')">✅</span>
+                  <span class="emoji-btn" onclick="selectEmoji('❌')">❌</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🎉')">🎉</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🔥')">🔥</span>
+                  <span class="emoji-btn" onclick="selectEmoji('💡')">💡</span>
+                  <span class="emoji-btn" onclick="selectEmoji('⭐')">⭐</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🚀')">🚀</span>
+                  <span class="emoji-btn" onclick="selectEmoji('😄')">😄</span>
+                  <span class="emoji-btn" onclick="selectEmoji('😢')">😢</span>
+                  <span class="emoji-btn" onclick="selectEmoji('😡')">😡</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🤔')">🤔</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🎯')">🎯</span>
+                  <span class="emoji-btn" onclick="selectEmoji('💪')">💪</span>
+                  <span class="emoji-btn" onclick="selectEmoji('❤️')">❤️</span>
+                  <span class="emoji-btn" onclick="selectEmoji('😍')">😍</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🤣')">🤣</span>
+                  <span class="emoji-btn" onclick="selectEmoji('😮')">😮</span>
+                  <span class="emoji-btn" onclick="selectEmoji('😱')">😱</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🙄')">🙄</span>
+                  <span class="emoji-btn" onclick="selectEmoji('😏')">😏</span>
+                  <span class="emoji-btn" onclick="selectEmoji('😴')">😴</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🤮')">🤮</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🤯')">🤯</span>
+                  <span class="emoji-btn" onclick="selectEmoji('👀')">👀</span>
+                  <span class="emoji-btn" onclick="selectEmoji('💩')">💩</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🙏')">🙏</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🤝')">🤝</span>
+                  <span class="emoji-btn" onclick="selectEmoji('🎊')">🎊</span>
+                  <span class="emoji-btn" onclick="selectEmoji('📈')">📈</span>
+                  <span class="emoji-btn" onclick="selectEmoji('📉')">📉</span>
+                  <span class="emoji-btn" onclick="selectEmoji('⚠️')">⚠️</span>
+                  <span class="emoji-btn" onclick="selectEmoji('❓')">❓</span>
+                </div>
+                <input type="hidden" id="item-emoji">
+                <div id="emoji-preview" class="text-center mt-2" style="display:none;">
+                  <strong>Выбрано: </strong><span id="emoji-preview-text" style="font-size: 2rem;"></span>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-primary" onclick="submitItem()">Добавить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Модальное окно завершения -->
+  <div class="modal fade" id="endSessionModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Завершение ретроспективы</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Итоги ретроспективы</label>
+            <textarea class="form-control" id="session-summary" rows="4" placeholder="Основные выводы..."></textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">План действий (Action Items)</label>
+            <div id="action-items-container">
+              <div class="input-group mb-2">
+                <input type="text" class="form-control action-item-input" placeholder="Задача">
+                <button class="btn btn-outline-danger" onclick="removeActionItem(this)">×</button>
+              </div>
+            </div>
+            <button class="btn btn-outline-primary btn-sm" onclick="addActionItem()">
+              <span class="material-icons">add</span>
+              Добавить задачу
+            </button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-success" onclick="confirmEndSession()">Завершить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно добавления мема -->
+  <div class="modal fade" id="addMemeModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Добавить мем в список</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Название мема</label>
+            <input type="text" class="form-control" id="meme-name" placeholder="Например: This is Fine">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">URL изображения</label>
+            <input type="text" class="form-control" id="meme-url" placeholder="https://...">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Список мемов (долгое нажатие для удаления)</label>
+            <div id="custom-memes-list" class="d-flex flex-wrap gap-1">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-primary" onclick="addCustomMeme()">Добавить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно подтверждения удаления мема -->
+  <div class="modal fade" id="deleteMemeConfirmModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Удалить мем?</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-danger" id="confirm-delete-meme-btn">Удалить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

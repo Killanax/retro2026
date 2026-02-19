@@ -1,0 +1,6 @@
+node_modules/
+retro.db
+logs/
+*.log
+.env
+.DS_Store
