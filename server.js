@@ -3,7 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
-const { initDatabase, db, loadMemesFromDb } = require('./database');
+const { initDatabase, pool, loadMemesFromDb } = require('./database');
 const { v4: uuidv4 } = require('uuid');
 
 // Телеграм-смайлы для реакций
@@ -38,24 +38,18 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Инициализация БД
-initDatabase();
-loadMemesFromDb();
-
 // ==================== API ====================
 
 // Создать новую сессию ретро
-app.post('/api/sessions', (req, res) => {
+app.post('/api/sessions', async (req, res) => {
   const { name, template, adminName } = req.body;
   const id = uuidv4();
-  
-  const stmt = db.prepare(`
-    INSERT INTO sessions (id, name, template, admin_name, status)
-    VALUES (?, ?, ?, ?, 'active')
-  `);
-  
+
   try {
-    stmt.run(id, name, template || 'classic', adminName || 'Admin');
+    await pool.query(
+      'INSERT INTO sessions (id, name, template, admin_name, status) VALUES ($1, $2, $3, $4, $5)',
+      [id, name, template || 'classic', adminName || 'Admin', 'active']
+    );
     res.json({ success: true, sessionId: id });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -63,50 +57,64 @@ app.post('/api/sessions', (req, res) => {
 });
 
 // Получить сессию
-app.get('/api/sessions/:id', (req, res) => {
-  const stmt = db.prepare('SELECT * FROM sessions WHERE id = ?');
-  const session = stmt.get(req.params.id);
-  
-  if (!session) {
-    return res.status(404).json({ error: 'Session not found' });
+app.get('/api/sessions/:id', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM sessions WHERE id = $1', [req.params.id]);
+    const session = result.rows[0];
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json(session);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  
-  res.json(session);
 });
 
 // Получить все идеи сессии
-app.get('/api/sessions/:id/items', (req, res) => {
-  const stmt = db.prepare('SELECT * FROM items WHERE session_id = ? ORDER BY created_at');
-  const items = stmt.all(req.params.id);
-  res.json(items);
+app.get('/api/sessions/:id/items', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM items WHERE session_id = $1 ORDER BY created_at',
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Получить одну идею
-app.get('/api/sessions/:id/items/:itemId', (req, res) => {
-  const stmt = db.prepare('SELECT * FROM items WHERE id = ?');
-  const item = stmt.get(req.params.itemId);
-  
-  if (!item) {
-    return res.status(404).json({ error: 'Item not found' });
+app.get('/api/sessions/:id/items/:itemId', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM items WHERE id = $1', [req.params.itemId]);
+    const item = result.rows[0];
+
+    if (!item) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    res.json(item);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  
-  res.json(item);
 });
 
 // Добавить идею
-app.post('/api/sessions/:id/items', (req, res) => {
+app.post('/api/sessions/:id/items', async (req, res) => {
   const { text, category, author, type, order } = req.body;
   const sessionId = req.params.id;
   const id = uuidv4();
 
-  const stmt = db.prepare(`
-    INSERT INTO items (id, session_id, text, category, author, type, "order")
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-
   try {
-    stmt.run(id, sessionId, text, category || 'general', author || 'Anonymous', type || 'text', order || 0);
-    const newItem = db.prepare('SELECT * FROM items WHERE id = ?').get(id);
+    await pool.query(
+      `INSERT INTO items (id, session_id, text, category, author, type, "order")
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, sessionId, text, category || 'general', author || 'Anonymous', type || 'text', order || 0]
+    );
+    const result = await pool.query('SELECT * FROM items WHERE id = $1', [id]);
+    const newItem = result.rows[0];
     io.to(sessionId).emit('item:created', newItem);
     res.json(newItem);
   } catch (err) {
@@ -115,31 +123,32 @@ app.post('/api/sessions/:id/items', (req, res) => {
 });
 
 // Обновить идею (голосование, статус, категория для drag-n-drop, порядок)
-app.patch('/api/sessions/:id/items/:itemId', (req, res) => {
+app.patch('/api/sessions/:id/items/:itemId', async (req, res) => {
   const { votes, status, category, text, order } = req.body;
   const { id: sessionId, itemId } = req.params;
 
   const updates = [];
   const params = [];
+  let paramIndex = 1;
 
   if (votes !== undefined) {
-    updates.push('votes = ?');
+    updates.push(`votes = $${paramIndex++}`);
     params.push(votes);
   }
   if (status !== undefined) {
-    updates.push('status = ?');
+    updates.push(`status = $${paramIndex++}`);
     params.push(status);
   }
   if (category !== undefined) {
-    updates.push('category = ?');
+    updates.push(`category = $${paramIndex++}`);
     params.push(category);
   }
   if (text !== undefined) {
-    updates.push('text = ?');
+    updates.push(`text = $${paramIndex++}`);
     params.push(text);
   }
   if (order !== undefined) {
-    updates.push('"order" = ?');
+    updates.push(`"order" = $${paramIndex++}`);
     params.push(order);
   }
 
@@ -149,11 +158,10 @@ app.patch('/api/sessions/:id/items/:itemId', (req, res) => {
 
   params.push(itemId);
 
-  const stmt = db.prepare(`UPDATE items SET ${updates.join(', ')} WHERE id = ?`);
-
   try {
-    stmt.run(...params);
-    const updatedItem = db.prepare('SELECT * FROM items WHERE id = ?').get(itemId);
+    await pool.query(`UPDATE items SET ${updates.join(', ')} WHERE id = $${paramIndex}`, params);
+    const result = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
+    const updatedItem = result.rows[0];
     console.log(`[WS] Emitting item:updated to session ${sessionId}:`, { id: updatedItem.id, category: updatedItem.category });
     io.to(sessionId).emit('item:updated', updatedItem);
     res.json(updatedItem);
@@ -163,14 +171,12 @@ app.patch('/api/sessions/:id/items/:itemId', (req, res) => {
 });
 
 // Удалить идею
-app.delete('/api/sessions/:id/items/:itemId', (req, res) => {
+app.delete('/api/sessions/:id/items/:itemId', async (req, res) => {
   const { id: sessionId, itemId } = req.params;
 
-  const stmt = db.prepare('DELETE FROM items WHERE id = ?');
-
   try {
-    const result = stmt.run(itemId);
-    console.log(`[WS] Emitting item:deleted to session ${sessionId}:`, { id: itemId, changes: result.changes });
+    const result = await pool.query('DELETE FROM items WHERE id = $1 RETURNING *', [itemId]);
+    console.log(`[WS] Emitting item:deleted to session ${sessionId}:`, { id: itemId, changes: result.rowCount });
     io.to(sessionId).emit('item:deleted', { id: itemId });
     res.json({ success: true });
   } catch (err) {
@@ -179,109 +185,115 @@ app.delete('/api/sessions/:id/items/:itemId', (req, res) => {
 });
 
 // Голосовать за идею
-app.post('/api/sessions/:id/items/:itemId/vote', (req, res) => {
+app.post('/api/sessions/:id/items/:itemId/vote', async (req, res) => {
   const { itemId } = req.params;
   const { id: sessionId } = req.params;
   const { userId } = req.body;
-  
-  // Проверка, голосовал ли уже пользователь
-  const existingVote = db.prepare(
-    'SELECT * FROM votes WHERE session_id = ? AND user_id = ? AND item_id = ?'
-  ).get(sessionId, userId, itemId);
-  
-  if (existingVote) {
-    // Удалить голос
-    db.prepare('DELETE FROM votes WHERE id = ?').run(existingVote.id);
-    db.prepare('UPDATE items SET votes = votes - 1 WHERE id = ?').run(itemId);
-  } else {
-    // Добавить голос
-    const voteId = uuidv4();
-    db.prepare(`
-      INSERT INTO votes (id, session_id, user_id, item_id)
-      VALUES (?, ?, ?, ?)
-    `).run(voteId, sessionId, userId, itemId);
-    db.prepare('UPDATE items SET votes = votes + 1 WHERE id = ?').run(itemId);
+
+  try {
+    // Проверка, голосовал ли уже пользователь
+    const existingVote = await pool.query(
+      'SELECT * FROM votes WHERE session_id = $1 AND user_id = $2 AND item_id = $3',
+      [sessionId, userId, itemId]
+    );
+
+    if (existingVote.rows[0]) {
+      // Удалить голос
+      await pool.query('DELETE FROM votes WHERE id = $1', [existingVote.rows[0].id]);
+      await pool.query('UPDATE items SET votes = votes - 1 WHERE id = $1', [itemId]);
+    } else {
+      // Добавить голос
+      const voteId = uuidv4();
+      await pool.query(
+        'INSERT INTO votes (id, session_id, user_id, item_id) VALUES ($1, $2, $3, $4)',
+        [voteId, sessionId, userId, itemId]
+      );
+      await pool.query('UPDATE items SET votes = votes + 1 WHERE id = $1', [itemId]);
+    }
+
+    const result = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
+    const updatedItem = result.rows[0];
+    io.to(sessionId).emit('item:updated', updatedItem);
+    res.json(updatedItem);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  
-  const updatedItem = db.prepare('SELECT * FROM items WHERE id = ?').get(itemId);
-  io.to(sessionId).emit('item:updated', updatedItem);
-  res.json(updatedItem);
 });
 
 // Добавить/удалить реакцию (смайл)
-app.post('/api/sessions/:id/items/:itemId/react', (req, res) => {
+app.post('/api/sessions/:id/items/:itemId/react', async (req, res) => {
   const { itemId } = req.params;
   const { id: sessionId } = req.params;
   const { userId, emoji, reactionName, remove } = req.body;
 
-  // Получаем текущие реакции
-  const item = db.prepare('SELECT * FROM items WHERE id = ?').get(itemId);
-  if (!item) {
-    return res.status(404).json({ error: 'Item not found' });
-  }
-
-  let reactions = item.reactions ? JSON.parse(item.reactions) : {};
-
-  // Инициализируем реакции если нет
-  TELEGRAM_EMOJIS.forEach(({ name }) => {
-    if (!reactions[name]) reactions[name] = 0;
-  });
-
-  // Проверяем реакцию пользователя
-  let userReactions = item.user_reactions ? JSON.parse(item.user_reactions) : {};
-
-  if (remove) {
-    // Удаляем реакцию
-    if (userReactions[userId]) {
-      const prevReaction = userReactions[userId];
-      if (reactions[prevReaction] > 0) {
-        reactions[prevReaction]--;
-      }
-      delete userReactions[userId];
+  try {
+    // Получаем текущие реакции
+    const itemResult = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
+    const item = itemResult.rows[0];
+    
+    if (!item) {
+      return res.status(404).json({ error: 'Item not found' });
     }
-  } else {
-    // Добавляем/меняем реакцию
-    if (userReactions[userId] && userReactions[userId] !== reactionName) {
-      // Удаляем старую реакцию
-      if (reactions[userReactions[userId]] > 0) {
-        reactions[userReactions[userId]]--;
+
+    let reactions = item.reactions ? JSON.parse(item.reactions) : {};
+    let userReactions = item.user_reactions ? JSON.parse(item.user_reactions) : {};
+
+    // Инициализируем реакции если нет
+    TELEGRAM_EMOJIS.forEach(({ name }) => {
+      if (!reactions[name]) reactions[name] = 0;
+    });
+
+    if (remove) {
+      // Удаляем реакцию
+      if (userReactions[userId]) {
+        const prevReaction = userReactions[userId];
+        if (reactions[prevReaction] > 0) {
+          reactions[prevReaction]--;
+        }
+        delete userReactions[userId];
       }
+    } else {
+      // Добавляем/меняем реакцию
+      if (userReactions[userId] && userReactions[userId] !== reactionName) {
+        // Удаляем старую реакцию
+        if (reactions[userReactions[userId]] > 0) {
+          reactions[userReactions[userId]]--;
+        }
+      }
+      // Добавляем новую
+      reactions[reactionName] = (reactions[reactionName] || 0) + 1;
+      userReactions[userId] = reactionName;
     }
-    // Добавляем новую
-    reactions[reactionName] = (reactions[reactionName] || 0) + 1;
-    userReactions[userId] = reactionName;
+
+    // Обновляем в БД
+    await pool.query(
+      'UPDATE items SET reactions = $1, user_reactions = $2 WHERE id = $3',
+      [JSON.stringify(reactions), JSON.stringify(userReactions), itemId]
+    );
+
+    const updatedResult = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
+    const updatedItem = updatedResult.rows[0];
+
+    io.to(sessionId).emit('reaction:updated', { itemId, reactions, user_reactions: userReactions, userId });
+    io.to(sessionId).emit('item:updated', updatedItem);
+
+    res.json(updatedItem);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  // Обновляем в БД
-  db.prepare('UPDATE items SET reactions = ?, user_reactions = ? WHERE id = ?')
-    .run(JSON.stringify(reactions), JSON.stringify(userReactions), itemId);
-
-  const updatedItem = db.prepare('SELECT * FROM items WHERE id = ?').get(itemId);
-  
-  // Отправляем через WebSocket всем клиентам в сессии
-  io.to(sessionId).emit('reaction:updated', { 
-    itemId, 
-    reactions, 
-    user_reactions: userReactions,
-    userId 
-  });
-  io.to(sessionId).emit('item:updated', updatedItem);
-  
-  res.json(updatedItem);
 });
 
 // Завершить сессию
-app.post('/api/sessions/:id/end', (req, res) => {
+app.post('/api/sessions/:id/end', async (req, res) => {
   const { summary, actionItems } = req.body;
   const { id } = req.params;
-  
-  const stmt = db.prepare(`
-    UPDATE sessions SET status = 'completed', summary = ?, action_items = ?, ended_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `);
-  
+
   try {
-    stmt.run(summary || null, actionItems ? JSON.stringify(actionItems) : null, id);
+    await pool.query(
+      `UPDATE sessions SET status = $1, summary = $2, action_items = $3, ended_at = CURRENT_TIMESTAMP
+       WHERE id = $4`,
+      ['completed', summary || null, actionItems ? JSON.stringify(actionItems) : null, id]
+    );
     io.to(id).emit('session:ended', { summary, actionItems });
     res.json({ success: true });
   } catch (err) {
@@ -290,31 +302,28 @@ app.post('/api/sessions/:id/end', (req, res) => {
 });
 
 // Получить историю сессий
-app.get('/api/sessions', (req, res) => {
-  const stmt = db.prepare(`
-    SELECT id, name, template, admin_name, status, created_at, ended_at
-    FROM sessions
-    ORDER BY created_at DESC
-  `);
-  const sessions = stmt.all();
-  res.json(sessions);
+app.get('/api/sessions', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, template, admin_name, status, created_at, ended_at
+      FROM sessions
+      ORDER BY created_at DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Удалить сессию
-app.delete('/api/sessions/:id', (req, res) => {
+app.delete('/api/sessions/:id', async (req, res) => {
   const { id } = req.params;
 
-  // Сначала удаляем все связанные записи
-  const deleteItems = db.prepare('DELETE FROM items WHERE session_id = ?');
-  const deleteVotes = db.prepare('DELETE FROM votes WHERE session_id = ?');
-  const deleteMoods = db.prepare('DELETE FROM user_moods WHERE session_id = ?');
-  const deleteSession = db.prepare('DELETE FROM sessions WHERE id = ?');
-
   try {
-    deleteItems.run(id);
-    deleteVotes.run(id);
-    deleteMoods.run(id);
-    deleteSession.run(id);
+    await pool.query('DELETE FROM items WHERE session_id = $1', [id]);
+    await pool.query('DELETE FROM votes WHERE session_id = $1', [id]);
+    await pool.query('DELETE FROM user_moods WHERE session_id = $1', [id]);
+    await pool.query('DELETE FROM sessions WHERE id = $1', [id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -324,25 +333,30 @@ app.delete('/api/sessions/:id', (req, res) => {
 // ==================== API для мемов ====================
 
 // Получить мемы сессии
-app.get('/api/sessions/:id/memes', (req, res) => {
-  const stmt = db.prepare('SELECT * FROM custom_memes WHERE session_id = ? ORDER BY created_at');
-  const memes = stmt.all(req.params.id);
-  res.json(memes);
+app.get('/api/sessions/:id/memes', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM custom_memes WHERE session_id = $1 ORDER BY created_at',
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Добавить мем
-app.post('/api/sessions/:id/memes', (req, res) => {
+app.post('/api/sessions/:id/memes', async (req, res) => {
   const { name, url, createdBy } = req.body;
   const sessionId = req.params.id;
 
-  const stmt = db.prepare(`
-    INSERT INTO custom_memes (session_id, name, url, created_by)
-    VALUES (?, ?, ?, ?)
-  `);
-
   try {
-    stmt.run(sessionId, name, url, createdBy || 'unknown');
-    const newMeme = db.prepare('SELECT * FROM custom_memes WHERE id = last_insert_rowid()').get();
+    const result = await pool.query(
+      `INSERT INTO custom_memes (session_id, name, url, created_by)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [sessionId, name, url, createdBy || 'unknown']
+    );
+    const newMeme = result.rows[0];
     io.to(sessionId).emit('meme:added', newMeme);
     res.json(newMeme);
   } catch (err) {
@@ -351,14 +365,15 @@ app.post('/api/sessions/:id/memes', (req, res) => {
 });
 
 // Удалить мем
-app.delete('/api/sessions/:id/memes/:memeId', (req, res) => {
+app.delete('/api/sessions/:id/memes/:memeId', async (req, res) => {
   const { id: sessionId, memeId } = req.params;
 
-  const stmt = db.prepare('DELETE FROM custom_memes WHERE id = ? AND session_id = ?');
-
   try {
-    const result = stmt.run(memeId, sessionId);
-    if (result.changes > 0) {
+    const result = await pool.query(
+      'DELETE FROM custom_memes WHERE id = $1 AND session_id = $2 RETURNING *',
+      [memeId, sessionId]
+    );
+    if (result.rows[0]) {
       io.to(sessionId).emit('meme:removed', { id: memeId });
       res.json({ success: true });
     } else {
@@ -370,7 +385,7 @@ app.delete('/api/sessions/:id/memes/:memeId', (req, res) => {
 });
 
 // Обновить лимит голосов
-app.post('/api/sessions/:id/vote-limit', (req, res) => {
+app.post('/api/sessions/:id/vote-limit', async (req, res) => {
   const { voteLimit } = req.body;
   const { id: sessionId } = req.params;
 
@@ -378,10 +393,8 @@ app.post('/api/sessions/:id/vote-limit', (req, res) => {
     return res.status(400).json({ error: 'Invalid vote limit' });
   }
 
-  const stmt = db.prepare('UPDATE sessions SET vote_limit = ? WHERE id = ?');
-
   try {
-    stmt.run(voteLimit, sessionId);
+    await pool.query('UPDATE sessions SET vote_limit = $1 WHERE id = $2', [voteLimit, sessionId]);
     io.to(sessionId).emit('vote-limit:updated', { voteLimit });
     res.json({ success: true, voteLimit });
   } catch (err) {
@@ -392,32 +405,34 @@ app.post('/api/sessions/:id/vote-limit', (req, res) => {
 // ==================== API для глобальных мемов ====================
 
 // Получить все глобальные мемы
-app.get('/api/memes', (req, res) => {
-  const stmt = db.prepare('SELECT * FROM global_memes WHERE is_active = 1 ORDER BY created_at DESC');
-  const memes = stmt.all();
-  res.json(memes);
+app.get('/api/memes', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM global_memes WHERE is_active = 1 ORDER BY created_at DESC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Добавить глобальный мем (только админ сессии)
-app.post('/api/memes', (req, res) => {
+app.post('/api/memes', async (req, res) => {
   const { name, url, createdBy, sessionId } = req.body;
 
   // Проверяем, является ли пользователь админом сессии
   if (sessionId) {
-    const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+    const sessionResult = await pool.query('SELECT * FROM sessions WHERE id = $1', [sessionId]);
+    const session = sessionResult.rows[0];
     if (!session || !session.admin_name) {
       return res.status(403).json({ error: 'Only session admin can add memes' });
     }
   }
 
-  const stmt = db.prepare(`
-    INSERT INTO global_memes (name, url, created_by)
-    VALUES (?, ?, ?)
-  `);
-
   try {
-    stmt.run(name, url, createdBy || 'unknown');
-    const newMeme = db.prepare('SELECT * FROM global_memes WHERE id = last_insert_rowid()').get();
+    const result = await pool.query(
+      `INSERT INTO global_memes (name, url, created_by) VALUES ($1, $2, $3) RETURNING *`,
+      [name, url, createdBy || 'unknown']
+    );
+    const newMeme = result.rows[0];
     io.emit('meme:added:global', newMeme);
     res.json(newMeme);
   } catch (err) {
@@ -426,14 +441,15 @@ app.post('/api/memes', (req, res) => {
 });
 
 // Удалить глобальный мем (только админ)
-app.delete('/api/memes/:memeId', (req, res) => {
+app.delete('/api/memes/:memeId', async (req, res) => {
   const { memeId } = req.params;
 
-  const stmt = db.prepare('UPDATE global_memes SET is_active = 0 WHERE id = ?');
-
   try {
-    const result = stmt.run(memeId);
-    if (result.changes > 0) {
+    const result = await pool.query(
+      'UPDATE global_memes SET is_active = 0 WHERE id = $1 RETURNING *',
+      [memeId]
+    );
+    if (result.rows[0]) {
       io.emit('meme:removed:global', { id: memeId });
       res.json({ success: true });
     } else {
@@ -445,18 +461,17 @@ app.delete('/api/memes/:memeId', (req, res) => {
 });
 
 // Обновить настроение пользователя
-app.post('/api/sessions/:id/mood', (req, res) => {
+app.post('/api/sessions/:id/mood', async (req, res) => {
   const { userId, mood } = req.body;
   const { id: sessionId } = req.params;
 
-  const stmt = db.prepare(`
-    INSERT INTO user_moods (session_id, user_id, mood)
-    VALUES (?, ?, ?)
-    ON CONFLICT(session_id, user_id) DO UPDATE SET mood = ?, updated_at = CURRENT_TIMESTAMP
-  `);
-
   try {
-    stmt.run(sessionId, userId, mood, mood);
+    await pool.query(
+      `INSERT INTO user_moods (session_id, user_id, mood)
+       VALUES ($1, $2, $3)
+       ON CONFLICT(session_id, user_id) DO UPDATE SET mood = $3, updated_at = CURRENT_TIMESTAMP`,
+      [sessionId, userId, mood]
+    );
     io.to(sessionId).emit('mood:updated', { userId, mood });
     res.json({ success: true, mood });
   } catch (err) {
@@ -465,19 +480,15 @@ app.post('/api/sessions/:id/mood', (req, res) => {
 });
 
 // Получить счётчики настроения
-app.get('/api/sessions/:id/moods', (req, res) => {
+app.get('/api/sessions/:id/moods', async (req, res) => {
   const { id: sessionId } = req.params;
 
-  const stmt = db.prepare(`
-    SELECT mood, COUNT(*) as count
-    FROM user_moods
-    WHERE session_id = ?
-    GROUP BY mood
-  `);
-
   try {
-    const moods = stmt.all(sessionId);
-    res.json(moods);
+    const result = await pool.query(
+      `SELECT mood, COUNT(*) as count FROM user_moods WHERE session_id = $1 GROUP BY mood`,
+      [sessionId]
+    );
+    res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -534,7 +545,7 @@ io.on('connection', (socket) => {
 
     console.log(`[WS] Emitted participant:joined to session ${sessionId}:`, { userId, name, isAdmin });
   });
-  
+
   socket.on('participant:list', (sessionId) => {
     const participants = sessionParticipants.get(sessionId) || [];
     socket.emit('participants:list', participants);
@@ -547,7 +558,7 @@ io.on('connection', (socket) => {
     io.to(sessionId).emit('timer:started', { seconds });
     console.log(`Timer started in session ${sessionId}: ${seconds}s`);
   });
-  
+
   socket.on('timer:stop', (data) => {
     const { sessionId } = data;
     const timer = sessionTimers.get(sessionId);
@@ -558,7 +569,7 @@ io.on('connection', (socket) => {
     io.to(sessionId).emit('timer:stopped');
     console.log(`Timer stopped in session ${sessionId}`);
   });
-  
+
   socket.on('timer:reset', (data) => {
     const { sessionId } = data;
     sessionTimers.set(sessionId, { seconds: 0, running: false });
@@ -569,7 +580,7 @@ io.on('connection', (socket) => {
   // Явный выход участника из сессии
   socket.on('participant:leave', (data) => {
     const { sessionId, userId } = data;
-    
+
     sessionParticipants.forEach((participants, sid) => {
       const index = participants.findIndex(p => p.userId === userId && (!sessionId || sid === sessionId));
       if (index >= 0) {
@@ -583,7 +594,7 @@ io.on('connection', (socket) => {
       }
     });
   });
-  
+
   socket.on('timer:finished', (data) => {
     const { sessionId } = data;
     sessionTimers.set(sessionId, { seconds: 0, running: false });
@@ -595,16 +606,15 @@ io.on('connection', (socket) => {
   });
 
   // Мемы - добавление через WebSocket
-  socket.on('meme:add', (data) => {
+  socket.on('meme:add', async (data) => {
     const { sessionId, name, url, createdBy } = data;
-    const stmt = db.prepare(`
-      INSERT INTO custom_memes (session_id, name, url, created_by)
-      VALUES (?, ?, ?, ?)
-    `);
     try {
-      stmt.run(sessionId, name, url, createdBy || 'unknown');
-      const newMeme = db.prepare('SELECT * FROM custom_memes WHERE id = last_insert_rowid()').get();
-      // Отправляем всем в сессии включая отправителя
+      const result = await pool.query(
+        `INSERT INTO custom_memes (session_id, name, url, created_by)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [sessionId, name, url, createdBy || 'unknown']
+      );
+      const newMeme = result.rows[0];
       io.in(sessionId).emit('meme:added', newMeme);
       console.log(`[WS] Meme added to session ${sessionId}: ${name}`);
     } catch (err) {
@@ -613,12 +623,14 @@ io.on('connection', (socket) => {
   });
 
   // Мемы - удаление через WebSocket
-  socket.on('meme:remove', (data) => {
+  socket.on('meme:remove', async (data) => {
     const { sessionId, memeId } = data;
-    const stmt = db.prepare('DELETE FROM custom_memes WHERE id = ? AND session_id = ?');
     try {
-      const result = stmt.run(memeId, sessionId);
-      if (result.changes > 0) {
+      const result = await pool.query(
+        'DELETE FROM custom_memes WHERE id = $1 AND session_id = $2 RETURNING *',
+        [memeId, sessionId]
+      );
+      if (result.rows[0]) {
         io.in(sessionId).emit('meme:removed', { id: memeId });
         console.log(`[WS] Meme removed from session ${sessionId}`);
       }
@@ -647,6 +659,13 @@ io.on('connection', (socket) => {
 });
 
 // Запуск сервера
-server.listen(PORT, () => {
-  console.log(`🚀 Retro server running on http://localhost:${PORT}`);
-});
+async function startServer() {
+  await initDatabase();
+  await loadMemesFromDb();
+  
+  server.listen(PORT, () => {
+    console.log(`🚀 Retro server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();
