@@ -79,9 +79,9 @@ body {
 .retro-column {
   background: white;
   border-radius: 12px;
-  padding: 20px;
-  min-width: 350px;
-  max-width: 450px;
+  padding: 12px;
+  min-width: 300px;
+  max-width: 400px;
   flex: 1;
   box-shadow: var(--card-shadow);
   min-height: 400px;
@@ -114,19 +114,19 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 15px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
   border-bottom: 2px solid #e5e7eb;
 }
 
 .column-title {
-  font-size: 1.25rem;
+  font-size: 1.1rem;
   font-weight: 600;
   color: #1f2937;
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .btn-edit-column {
@@ -154,18 +154,18 @@ body {
 
 .column-badge {
   background: #e5e7eb;
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 0.875rem;
+  padding: 3px 10px;
+  border-radius: 16px;
+  font-size: 0.75rem;
   color: #6b7280;
 }
 
 /* Элементы (карточки идей) */
 .retro-item {
   background: white;
-  border-radius: 10px;
-  padding: 16px;
-  margin-bottom: 12px;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   transition: all 0.3s;
   border-left: 4px solid var(--primary-color);
@@ -225,29 +225,30 @@ body {
 }
 
 .retro-item-author {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: #6b7280;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
 .retro-item-text {
+  font-size: 0.875rem;
   color: #1f2937;
-  margin-bottom: 12px;
-  line-height: 1.5;
+  margin-bottom: 8px;
+  line-height: 1.4;
   white-space: pre-wrap;
 }
 
 .retro-item-meme {
   max-width: 100%;
-  border-radius: 8px;
-  margin: 8px 0;
+  border-radius: 6px;
+  margin: 6px 0;
 }
 
 .retro-item-emoji {
-  font-size: 3rem;
-  margin: 8px 0;
+  font-size: 2rem;
+  margin: 6px 0;
   text-align: center;
 }
 
@@ -256,13 +257,13 @@ body {
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 /* Кнопки реакций */
 .reactions-container {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
@@ -270,13 +271,13 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 10px;
-  border-radius: 20px;
+  padding: 4px 8px;
+  border-radius: 16px;
   border: 2px solid #e5e7eb;
   background: white;
   cursor: pointer;
   transition: all 0.2s;
-  font-size: 0.875rem;
+  font-size: 0.75rem;
 }
 
 .reaction-btn:hover {

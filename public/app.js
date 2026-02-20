@@ -438,16 +438,18 @@ function setMood(mood) {
 
 // Обновление отображения настроения пользователя
 function updateUserMoodDisplay(userId, mood) {
-  // Снимаем активный класс со всех кнопок
-  document.querySelectorAll('.mood-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.mood === mood && userId === currentUserId);
-  });
+  // Обновляем только если это текущий пользователь
+  if (userId === currentUserId) {
+    document.querySelectorAll('.mood-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.mood === mood);
+    });
+  }
 }
 
 // Загрузка счётчиков настроения
 function loadMoodCounts() {
   if (!currentSession) return;
-  
+
   fetch(`/api/sessions/${currentSession.id}/moods`)
     .then(response => response.json())
     .then(moods => {
@@ -455,7 +457,7 @@ function loadMoodCounts() {
       ['happy', 'smile', 'neutral', 'tired', 'dead'].forEach(mood => {
         document.getElementById(`mood-count-${mood}`).textContent = '0';
       });
-      
+
       // Устанавливаем счётчики
       moods.forEach(m => {
         const countEl = document.getElementById(`mood-count-${m.mood}`);
@@ -466,6 +468,21 @@ function loadMoodCounts() {
     })
     .catch(error => {
       console.error('Error loading moods:', error);
+    });
+
+  // Загружаем настроение текущего пользователя
+  fetch(`/api/sessions/${currentSession.id}/mood/${currentUserId}`)
+    .then(response => response.json())
+    .then(data => {
+      if (data.mood) {
+        userMood = data.mood;
+        document.querySelectorAll('.mood-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.mood === data.mood);
+        });
+      }
+    })
+    .catch(error => {
+      console.error('Error loading user mood:', error);
     });
 }
 
@@ -736,6 +753,13 @@ async function loadSessionData() {
 
   // Загружаем настроения
   loadMoodCounts();
+  
+  // Восстанавливаем подсветку настроения пользователя
+  if (userMood) {
+    document.querySelectorAll('.mood-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.mood === userMood);
+    });
+  }
 
   socket.emit('participant:list', currentSession.id);
 }

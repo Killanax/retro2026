@@ -540,6 +540,21 @@ app.get('/api/sessions/:id/moods', async (req, res) => {
   }
 });
 
+// Получить настроение текущего пользователя
+app.get('/api/sessions/:id/mood/:userId', async (req, res) => {
+  const { id: sessionId, userId } = req.params;
+
+  try {
+    const result = await pool.query(
+      `SELECT mood FROM user_moods WHERE session_id = $1 AND user_id = $2`,
+      [sessionId, userId]
+    );
+    res.json({ mood: result.rows[0]?.mood || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== WebSocket ====================
 
 // Хранилище таймеров по сессиям
