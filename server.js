@@ -4,7 +4,9 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 const { initDatabase, pool, loadMemesFromDb } = require('./database');
-const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
+
+const uuidv4 = () => crypto.randomUUID();
 
 // Телеграм-смайлы для реакций
 const TELEGRAM_EMOJIS = [
