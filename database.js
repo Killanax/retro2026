@@ -6,6 +6,15 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
+// Проверка подключения
+pool.on('connect', () => {
+  console.log('✅ Connected to PostgreSQL');
+});
+
+pool.on('error', (err) => {
+  console.error('❌ Unexpected PostgreSQL error:', err.message);
+});
+
 // Объект для эмуляции better-sqlite3 API
 const db = {
   prepare(sql) {
@@ -62,6 +71,12 @@ const db = {
 };
 
 async function initDatabase() {
+  if (!process.env.DATABASE_URL) {
+    console.error('❌ DATABASE_URL is not set! Please add it in Render dashboard.');
+    console.error('📌 Connect your Supabase database and get the connection string.');
+    throw new Error('DATABASE_URL is required');
+  }
+
   const client = await pool.connect();
   try {
     // Таблица сессий
