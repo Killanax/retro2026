@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: retro-board
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: DB_TYPE
+        value: postgres
+      - key: DATABASE_URL
+        sync: false
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000

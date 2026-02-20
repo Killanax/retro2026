@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # PostgreSQL для локальной разработки
+  postgres:
+    image: postgres:15-alpine
+    container_name: retro-postgres
+    environment:
+      POSTGRES_USER: retro
+      POSTGRES_PASSWORD: retro123
+      POSTGRES_DB: retro_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U retro"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Приложение
+  app:
+    build: .
+    container_name: retro-app
+    environment:
+      DB_TYPE: postgres
+      DATABASE_URL: postgresql://retro:retro123@postgres:5432/retro_db
+      NODE_ENV: development
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:
