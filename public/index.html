@@ -33,7 +33,7 @@
               
               <ul class="nav nav-tabs mb-4" role="tablist">
                 <li class="nav-item" role="presentation">
-                  <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#create-tab">
+                  <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#create-tab" id="create-tab-btn">
                     <span class="material-icons me-1">add_circle</span>
                     Создать
                   </button>
@@ -55,7 +55,26 @@
               <div class="tab-content">
                 <!-- Создание новой сессии -->
                 <div class="tab-pane fade show active" id="create-tab">
-                  <form id="create-session-form">
+                  <div id="create-tab-locked">
+                    <div class="text-center py-4">
+                      <span class="material-icons display-1 text-muted">lock</span>
+                      <h5 class="mt-3">Создание сессии доступно только авторизованным пользователям</h5>
+                      <p class="text-muted">Введите пароль для доступа</p>
+                      <button class="btn btn-primary mt-2" onclick="showPasswordModal()">
+                        <span class="material-icons me-1">lock_open</span>
+                        Ввести пароль
+                      </button>
+                    </div>
+                  </div>
+                  <div id="create-tab-unlocked" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                      <h5 class="mb-0">🔓 Создание сессии</h5>
+                      <button class="btn btn-outline-secondary btn-sm" onclick="lockCreateTab()">
+                        <span class="material-icons" style="font-size: 16px;">lock</span>
+                        Закрыть
+                      </button>
+                    </div>
+                    <form id="create-session-form">
                     <div class="mb-3">
                       <label class="form-label">Название ретроспективы</label>
                       <input type="text" class="form-control" id="session-name" placeholder="Например: Спринт 24" required>
@@ -83,6 +102,7 @@
                       Создать сессию
                     </button>
                   </form>
+                  </div>
                 </div>
                 
                 <!-- Присоединение к сессии -->
@@ -115,6 +135,32 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно ввода пароля -->
+  <div class="modal fade" id="passwordModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <span class="material-icons me-2">lock</span>
+            Введите пароль
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="password" id="create-tab-password" class="form-control" placeholder="Пароль" autofocus>
+          <small class="text-muted mt-2 d-block">Для доступа к созданию сессий</small>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-primary" onclick="checkPassword()">
+            <span class="material-icons me-1" style="font-size: 16px;">lock_open</span>
+            Открыть
+          </button>
         </div>
       </div>
     </div>

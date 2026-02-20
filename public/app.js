@@ -98,6 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initSocket();
   setupEventListeners();
   setupMoodSelector();
+  setupCreateTabPassword();
   renderQuickMemesButtons(); // Рендерим базовые мемы (globalMemes ещё пустой)
 
   // Сначала пробуем восстановить сессию из localStorage
@@ -108,6 +109,119 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
+// Настройка пароля на вкладку создания
+const CREATE_TAB_PASSWORD = 'yurassss';
+let createTabUnlocked = false;
+
+function setupCreateTabPassword() {
+  // Проверяем, разблокирована ли вкладка в sessionStorage
+  const unlocked = sessionStorage.getItem('createTabUnlocked');
+  if (unlocked === 'true') {
+    unlockCreateTab();
+  } else {
+    // Если не разблокирована, переключаем на вкладку "Присоединиться"
+    const joinTab = document.querySelector('[data-bs-target="#join-tab"]');
+    if (joinTab) {
+      const tab = new bootstrap.Tab(joinTab);
+      tab.show();
+    }
+  }
+  
+  // Обработчик нажатия Enter в поле пароля
+  const passwordInput = document.getElementById('create-tab-password');
+  if (passwordInput) {
+    passwordInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        checkPassword();
+      }
+    });
+  }
+  
+  // Блокируем вкладку при переключении на неё, если не разблокирована
+  const createTabBtn = document.getElementById('create-tab-btn');
+  if (createTabBtn) {
+    createTabBtn.addEventListener('click', (e) => {
+      if (!createTabUnlocked) {
+        // Показываем модальное окно вместо переключения вкладки
+        e.preventDefault();
+        showPasswordModal();
+      }
+    });
+  }
+}
+
+function showPasswordModal() {
+  const modal = new bootstrap.Modal(document.getElementById('passwordModal'));
+  modal.show();
+  
+  // Фокус на поле ввода после показа
+  document.getElementById('passwordModal').addEventListener('shown.bs.modal', () => {
+    document.getElementById('create-tab-password').focus();
+  });
+}
+
+function checkPassword() {
+  const password = document.getElementById('create-tab-password').value;
+  
+  if (password === CREATE_TAB_PASSWORD) {
+    unlockCreateTab();
+    sessionStorage.setItem('createTabUnlocked', 'true');
+    
+    // Закрываем модальное окно
+    const modalEl = document.getElementById('passwordModal');
+    const modal = bootstrap.Modal.getInstance(modalEl);
+    if (modal) {
+      modal.hide();
+    }
+    
+    // Очищаем поле пароля
+    document.getElementById('create-tab-password').value = '';
+    
+    // Переключаем на вкладку создания
+    const createTab = document.querySelector('[data-bs-target="#create-tab"]');
+    if (createTab) {
+      const tab = new bootstrap.Tab(createTab);
+      tab.show();
+    }
+    
+    showToast('Доступ разрешён', 'success');
+  } else {
+    showToast('Неверный пароль', 'danger');
+    document.getElementById('create-tab-password').value = '';
+    document.getElementById('create-tab-password').focus();
+  }
+}
+
+function unlockCreateTab() {
+  const locked = document.getElementById('create-tab-locked');
+  const unlocked = document.getElementById('create-tab-unlocked');
+  
+  if (locked && unlocked) {
+    locked.style.display = 'none';
+    unlocked.style.display = 'block';
+    createTabUnlocked = true;
+  }
+}
+
+function lockCreateTab() {
+  const locked = document.getElementById('create-tab-locked');
+  const unlocked = document.getElementById('create-tab-unlocked');
+  
+  if (locked && unlocked) {
+    locked.style.display = 'block';
+    unlocked.style.display = 'none';
+    createTabUnlocked = false;
+    sessionStorage.removeItem('createTabUnlocked');
+    
+    // Переключаем на вкладку "Присоединиться"
+    const joinTab = document.querySelector('[data-bs-target="#join-tab"]');
+    if (joinTab) {
+      const tab = new bootstrap.Tab(joinTab);
+      tab.show();
+    }
+  }
+}
 
 // Проверка URL на наличие ID сессии
 function checkUrlForSession() {
@@ -364,6 +478,12 @@ function sendJoinToSession(sessionId) {
 function setupEventListeners() {
   document.getElementById('create-session-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    // Проверяем, разблокирована ли вкладка
+    if (!createTabUnlocked) {
+      showToast('Введите пароль для доступа к созданию сессии', 'warning');
+      showPasswordModal();
+      return;
+    }
     await createSession();
   });
 
