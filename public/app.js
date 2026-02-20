@@ -2187,7 +2187,7 @@ async function loadHistory() {
       return `
         <div class="list-group-item list-group-item-action session-history-item">
           <div class="d-flex w-100 justify-content-between align-items-center">
-            <div onclick="loadSession('${s.id}')">
+            <div onclick="viewSessionDetails('${s.id}')" style="cursor: pointer;">
               <h6 class="mb-1">${escapeHtml(s.name)}</h6>
               <small class="text-muted">ID: ${s.id}</small><br>
               <small class="text-muted">Шаблон: ${s.template} • Ведущий: ${s.admin_name}</small><br>
@@ -2196,7 +2196,6 @@ async function loadHistory() {
             <div class="text-end">
               <span class="session-status-badge status-${s.status} mb-2">${isActive ? 'Активна' : 'Завершена'}</span><br>
               ${isActive ? `<button class="btn btn-sm btn-outline-danger me-1" onclick="event.stopPropagation(); quickEndSession('${s.id}', '${escapeHtml(s.name)}')">Завершить</button>` : ''}
-              <button class="btn btn-sm btn-outline-primary me-1" onclick="event.stopPropagation(); viewSessionDetails('${s.id}')">Просмотр</button>
               ${!isActive ? `<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteSession('${s.id}')">Удалить</button>` : ''}
             </div>
           </div>
@@ -2214,11 +2213,11 @@ async function loadHistory() {
 let currentViewSessionId = null;
 async function viewSessionDetails(sessionId) {
   currentViewSessionId = sessionId;
-  
+
   try {
     const response = await fetch(`/api/sessions/${sessionId}`);
     const session = await response.json();
-    
+
     // Показываем итоги
     const summaryEl = document.getElementById('session-summary-view');
     if (session.summary) {
@@ -2226,7 +2225,7 @@ async function viewSessionDetails(sessionId) {
     } else {
       summaryEl.innerHTML = '<p class="text-muted mb-0">Нет итогов</p>';
     }
-    
+
     // Показываем план действий
     const actionsEl = document.getElementById('session-actions-view');
     if (session.action_items) {
@@ -2234,7 +2233,7 @@ async function viewSessionDetails(sessionId) {
       try {
         actions = JSON.parse(session.action_items);
       } catch (e) {}
-      
+
       if (actions.length > 0) {
         actionsEl.innerHTML = '<ul class="mb-0">' + actions.map(a => `<li>${escapeHtml(a)}</li>`).join('') + '</ul>';
       } else {
@@ -2243,15 +2242,108 @@ async function viewSessionDetails(sessionId) {
     } else {
       actionsEl.innerHTML = '<p class="text-muted mb-0">Нет плана действий</p>';
     }
-    
+
+    // Загружаем и показываем все идеи
+    await loadSessionItemsView(sessionId);
+
     // Показываем кнопку удаления только для завершённых
     document.getElementById('delete-session-btn').style.display = session.status === 'active' ? 'none' : 'block';
-    
+
     const modal = new bootstrap.Modal(document.getElementById('viewSessionModal'));
     modal.show();
   } catch (error) {
     console.error('Error loading session details:', error);
     showToast('Ошибка загрузки деталей', 'danger');
+  }
+}
+
+// Загрузка идей для просмотра сессии
+async function loadSessionItemsView(sessionId) {
+  const container = document.getElementById('session-items-view');
+  
+  try {
+    const response = await fetch(`/api/sessions/${sessionId}/items`);
+    const items = await response.json();
+
+    if (items.length === 0) {
+      container.innerHTML = '<div class="text-center text-muted py-4">В этой сессии нет идей</div>';
+      return;
+    }
+
+    // Группируем по категориям
+    const categories = {
+      'general': { name: 'Общее', icon: 'lightbulb', color: 'bg-secondary' },
+      'start': { name: 'Начать', icon: 'rocket_launch', color: 'bg-success' },
+      'stop': { name: 'Перестать', icon: 'stop', color: 'bg-danger' },
+      'continue': { name: 'Продолжать', icon: 'play_arrow', color: 'bg-primary' },
+      'mad': { name: 'Злит', icon: 'anger', color: 'bg-danger' },
+      'sad': { name: 'Расстраивает', icon: 'sentiment_dissatisfied', color: 'bg-warning' },
+      'glad': { name: 'Радует', icon: 'sentiment_satisfied', color: 'bg-success' },
+      'good': { name: 'Хорошо', icon: 'thumb_up', color: 'bg-success' },
+      'bad': { name: 'Плохо', icon: 'thumb_down', color: 'bg-danger' },
+      'ideas': { name: 'Идеи', icon: 'lightbulb', color: 'bg-info' },
+      'keep': { name: 'Сохранить', icon: 'bookmark', color: 'bg-primary' },
+      'improve': { name: 'Улучшить', icon: 'trending_up', color: 'bg-warning' },
+      'wind': { name: 'Ветер', icon: 'air', color: 'bg-info' },
+      'anchor': { name: 'Якорь', icon: 'anchor', color: 'bg-secondary' },
+      'rocks': { name: 'Скалы', icon: 'rock', color: 'bg-danger' },
+      'island': { name: 'Остров', icon: 'travel_explore', color: 'bg-success' }
+    };
+
+    const grouped = {};
+    items.forEach(item => {
+      if (!grouped[item.category]) grouped[item.category] = [];
+      grouped[item.category].push(item);
+    });
+
+    let html = '';
+    for (const [catKey, catItems] of Object.entries(grouped)) {
+      const cat = categories[catKey] || { name: catKey, icon: 'folder', color: 'bg-secondary' };
+      html += `
+        <div class="card mb-3">
+          <div class="card-header ${cat.color} text-white">
+            <span class="material-icons me-1 align-middle" style="font-size: 18px;">${cat.icon}</span>
+            <strong>${cat.name}</strong>
+            <span class="badge bg-white text-dark ms-2">${catItems.length}</span>
+          </div>
+          <div class="card-body">
+      `;
+
+      for (const item of catItems) {
+        let reactions = '';
+        try {
+          const itemReactions = JSON.parse(item.reactions || '{}');
+          const totalReactions = Object.values(itemReactions).reduce((a, b) => a + b, 0);
+          if (totalReactions > 0) {
+            reactions = `<span class="badge bg-secondary ms-2">😊 ${totalReactions}</span>`;
+          }
+        } catch (e) {}
+
+        const voteBadge = item.votes > 0 ? `<span class="badge bg-primary ms-2">👍 ${item.votes}</span>` : '';
+        const authorBadge = item.author ? `<small class="text-muted"> — ${escapeHtml(item.author)}</small>` : '';
+        const createdAt = item.created_at ? `<br><small class="text-muted">${new Date(item.created_at).toLocaleString()}</small>` : '';
+
+        html += `
+          <div class="card mb-2 ${item.type === 'meme' ? 'bg-light' : ''}">
+            <div class="card-body py-2">
+              ${item.type === 'meme' && item.meme_url ? `<img src="${escapeHtml(item.meme_url)}" alt="Meme" class="img-fluid rounded mb-2" style="max-height: 200px;"><br>` : ''}
+              <p class="mb-1">${escapeHtml(item.text)}</p>
+              <small class="text-muted">${voteBadge}${reactions}${authorBadge}${createdAt}</small>
+            </div>
+          </div>
+        `;
+      }
+
+      html += `
+          </div>
+        </div>
+      `;
+    }
+
+    container.innerHTML = html;
+  } catch (error) {
+    console.error('Error loading items:', error);
+    container.innerHTML = '<div class="text-center text-danger py-4">Ошибка загрузки идей</div>';
   }
 }
 
