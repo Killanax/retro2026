@@ -129,6 +129,29 @@ body {
   gap: 8px;
 }
 
+.btn-edit-column {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-edit-column:hover {
+  opacity: 1;
+  background-color: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+
+.btn-edit-column .material-icons {
+  font-size: 18px;
+  color: #6b7280;
+}
+
 .column-badge {
   background: #e5e7eb;
   padding: 4px 12px;

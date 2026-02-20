@@ -322,7 +322,20 @@ function initSocket() {
     participants = new Map(data.map(p => [p.userId, { name: p.name, isAdmin: p.isAdmin }]));
     updateParticipantsList();
   });
-  
+
+  socket.on('columns:updated', (data) => {
+    console.log('[WS] Columns updated:', data);
+    if (currentSession) {
+      // Обновляем column_headers в текущей сессии
+      const columnHeaders = {};
+      data.columns.forEach(col => {
+        columnHeaders[col.category] = col.name;
+      });
+      currentSession.column_headers = JSON.stringify(columnHeaders);
+      renderColumns();
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('Disconnected from server');
   });
@@ -734,7 +747,13 @@ function renderColumns() {
 
   container.className = `col template-${currentSession.template}`;
 
+  // Получаем кастомные заголовки из сессии
+  const columnHeaders = currentSession.column_headers ? JSON.parse(currentSession.column_headers) : {};
+
   container.innerHTML = template.columns.map((col, index) => {
+    // Используем кастомный заголовок или заголовок по умолчанию
+    const columnHeader = columnHeaders[col.category] || col.name;
+
     // Обработчики drag-n-drop только для админа
     const dragAttrs = isAdmin ? `
       ondragover="handleColumnDragOver(event, '${col.category}')"
@@ -751,12 +770,19 @@ function renderColumns() {
       ondragleave="handleButtonDragLeave(event)"
       ondrop="handleDropOnButton(event, '${col.category}')"` : '';
 
+    // Кнопка редактирования только для админа
+    const editButton = isAdmin ? `
+      <button class="btn-edit-column" onclick="openEditColumnModal('${col.category}', '${columnHeader.replace(/'/g, "\\'")}')">
+        <span class="material-icons">edit</span>
+      </button>` : '';
+
     return `
       <div class="retro-column column-${index + 1}" data-category="${col.category}" ${dragAttrs}>
         <div class="column-header">
           <h5 class="column-title">
             <span class="material-icons">label</span>
-            ${col.name}
+            ${columnHeader}
+            ${editButton}
           </h5>
           <span class="column-badge" id="badge-${col.category}">0</span>
         </div>
@@ -797,6 +823,46 @@ function openAddItemModal(category) {
   
   const modal = new bootstrap.Modal(document.getElementById('addItemModal'));
   modal.show();
+}
+
+// Открытие модального окна редактирования заголовка колонки
+function openEditColumnModal(category, currentTitle) {
+  document.getElementById('edit-column-category').value = category;
+  document.getElementById('edit-column-title').value = currentTitle;
+  
+  const modal = new bootstrap.Modal(document.getElementById('editColumnModal'));
+  modal.show();
+}
+
+// Сохранение отредактированного заголовка
+async function saveColumnTitle() {
+  const category = document.getElementById('edit-column-category').value;
+  const newTitle = document.getElementById('edit-column-title').value.trim();
+  
+  if (!newTitle) {
+    alert('Заголовок не может быть пустым');
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/api/sessions/${currentSession.id}/columns`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        columns: [{ category, name: newTitle }]
+      })
+    });
+    
+    if (response.ok) {
+      const modal = bootstrap.Modal.getInstance(document.getElementById('editColumnModal'));
+      modal.hide();
+    } else {
+      const error = await response.json();
+      alert('Ошибка: ' + error.error);
+    }
+  } catch (err) {
+    alert('Ошибка при сохранении: ' + err.message);
+  }
 }
 
 // Вставка смайла в текст

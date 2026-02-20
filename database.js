@@ -109,6 +109,7 @@ if (isPostgres) {
         summary TEXT,
         action_items TEXT,
         vote_limit INTEGER DEFAULT 5,
+        column_headers TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         ended_at TIMESTAMP
       )
@@ -278,6 +279,7 @@ if (isPostgres) {
         summary TEXT,
         action_items TEXT,
         vote_limit INTEGER DEFAULT 5,
+        column_headers TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         ended_at DATETIME
       )

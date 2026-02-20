@@ -74,6 +74,50 @@ app.get('/api/sessions/:id', async (req, res) => {
   }
 });
 
+// Обновить заголовки категорий (для админа)
+app.patch('/api/sessions/:id/columns', async (req, res) => {
+  const { columns } = req.body; // [{ category: 'start', name: 'New Name' }]
+  const sessionId = req.params.id;
+
+  try {
+    // Получаем текущую сессию
+    const sessionResult = await pool.query('SELECT * FROM sessions WHERE id = $1', [sessionId]);
+    const session = sessionResult.rows[0];
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Получаем или инициализируем column_headers
+    let columnHeaders = session.column_headers ? JSON.parse(session.column_headers) : {};
+
+    // Обновляем заголовки
+    if (Array.isArray(columns)) {
+      columns.forEach(col => {
+        if (col.category && col.name) {
+          columnHeaders[col.category] = col.name;
+        }
+      });
+    }
+
+    // Сохраняем в БД
+    await pool.query(
+      'UPDATE sessions SET column_headers = $1 WHERE id = $2',
+      [JSON.stringify(columnHeaders), sessionId]
+    );
+
+    // Отправляем событие всем клиентам
+    io.to(sessionId).emit('columns:updated', { columns: Object.keys(columnHeaders).map(cat => ({
+      category: cat,
+      name: columnHeaders[cat]
+    })) });
+
+    res.json({ success: true, column_headers: columnHeaders });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Получить все идеи сессии
 app.get('/api/sessions/:id/items', async (req, res) => {
   try {
