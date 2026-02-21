@@ -104,6 +104,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Сначала пробуем восстановить сессию из localStorage
   restoreSession().then(restored => {
+    // Проверяем наличие активной сессии и показываем кнопку "Вернуться в сессию"
+    checkActiveSession();
+    
     // Если не восстановили, проверяем URL
     if (!restored) {
       checkUrlForSession();
@@ -128,9 +131,6 @@ function setupCreateTabPassword() {
       tab.show();
     }
   }
-
-  // Проверяем наличие активной сессии и показываем кнопку "Вернуться в сессию"
-  checkActiveSession();
 
   // Обработчик нажатия Enter в поле пароля
   const passwordInput = document.getElementById('create-tab-password');
@@ -652,7 +652,7 @@ async function restoreSession() {
       console.log('[WS] Restored session from localStorage:', { sessionId: currentSession.id, userId: currentUserId, isAdmin, socketConnected: socket?.connected });
 
       showSessionPage();
-      
+
       // Ждём подключения WebSocket перед загрузкой данных
       if (!socket?.connected) {
         await new Promise(resolve => {
@@ -665,14 +665,14 @@ async function restoreSession() {
           setTimeout(resolve, 3000);
         });
       }
-      
+
       // Отправляем join если сокет подключён
       if (socket?.connected) {
         sendJoinToSession(currentSession.id);
       }
-      
+
       await loadSessionData();
-      
+
       // Если это админ, скрываем вкладку "Создать"
       if (isAdmin) {
         const createTab = document.querySelector('[data-bs-target="#create-tab"]');
@@ -680,11 +680,11 @@ async function restoreSession() {
           createTab.parentElement.style.display = 'none';
         }
       }
-      
+
       return true;
     } catch (e) {
-      console.error('Error restoring session:', e);
-      localStorage.removeItem('retroSession');
+      // Не удаляем сессию при ошибке - даём пользователю возможность вернуться через кнопку
+      console.error('Error restoring session (session preserved in localStorage):', e);
     }
   }
   return false;
