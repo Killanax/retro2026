@@ -9,6 +9,7 @@ let timerInterval = null;
 let timerSeconds = 0;
 let timerRunning = false;
 let joinSent = false; // Флаг для предотвращения дублирования join
+let addedItems = new Set(); // Set для отслеживания добавленных элементов (предотвращение дубликатов)
 
 // Лимит голосов
 let voteLimit = 5;
@@ -304,6 +305,11 @@ function initSocket() {
   });
   
   socket.on('item:created', (item) => {
+    // Игнорируем если элемент уже был добавлен локально (предотвращение дубликатов)
+    if (addedItems.has(item.id)) {
+      console.log('[WS] item:created ignored (already added locally):', item.id);
+      return;
+    }
     if (item.session_id === currentSession?.id) {
       addItemToColumn(item);
       showToast('Новый элемент добавлен!', 'info');
@@ -838,7 +844,10 @@ async function loadSession(sessionId) {
 // Загрузка данных сессии
 async function loadSessionData() {
   if (!currentSession) return;
-  
+
+  // Очищаем Set добавленных элементов при загрузке новой сессии
+  addedItems.clear();
+
   document.getElementById('session-title').textContent = currentSession.name;
   const templateName = TEMPLATES[currentSession.template]?.name || currentSession.template;
   document.getElementById('session-info').textContent = `${templateName} • ${currentSession.status}`;
@@ -1401,6 +1410,8 @@ async function submitItem() {
 
     // Добавляем элемент в UI сразу, не дожидаясь WebSocket события
     addItemToColumn(item);
+    // Помечаем элемент как добавленный (для предотвращения дубликатов)
+    addedItems.add(item.id);
 
     const modal = bootstrap.Modal.getInstance(document.getElementById('addItemModal'));
     if (modal) modal.hide();
@@ -2674,6 +2685,7 @@ function goHome() {
   isAdmin = false;
   userReactions = {};
   participants.clear();
+  addedItems.clear();
   stopTimerInterval();
   timerSeconds = 0;
   timerRunning = false;
