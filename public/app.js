@@ -127,7 +127,10 @@ function setupCreateTabPassword() {
       tab.show();
     }
   }
-  
+
+  // Проверяем наличие активной сессии и показываем кнопку "Вернуться в сессию"
+  checkActiveSession();
+
   // Обработчик нажатия Enter в поле пароля
   const passwordInput = document.getElementById('create-tab-password');
   if (passwordInput) {
@@ -207,13 +210,13 @@ function unlockCreateTab() {
 function lockCreateTab() {
   const locked = document.getElementById('create-tab-locked');
   const unlocked = document.getElementById('create-tab-unlocked');
-  
+
   if (locked && unlocked) {
     locked.style.display = 'block';
     unlocked.style.display = 'none';
     createTabUnlocked = false;
     sessionStorage.removeItem('createTabUnlocked');
-    
+
     // Переключаем на вкладку "Присоединиться"
     const joinTab = document.querySelector('[data-bs-target="#join-tab"]');
     if (joinTab) {
@@ -221,6 +224,31 @@ function lockCreateTab() {
       tab.show();
     }
   }
+}
+
+// Проверка наличия активной сессии и отображение кнопки "Вернуться в сессию"
+function checkActiveSession() {
+  const saved = localStorage.getItem('retroSession');
+  const noticeDiv = document.getElementById('active-session-notice');
+  const returnBtn = document.getElementById('return-session-btn');
+  
+  if (saved) {
+    try {
+      const data = JSON.parse(saved);
+      if (data.isAdmin && data.session) {
+        // Показываем кнопку возврата в сессию
+        if (noticeDiv) noticeDiv.style.display = 'block';
+        if (returnBtn) returnBtn.style.display = 'inline-block';
+        return;
+      }
+    } catch (e) {
+      console.error('Error checking active session:', e);
+    }
+  }
+  
+  // Скрываем кнопку если нет активной сессии
+  if (noticeDiv) noticeDiv.style.display = 'none';
+  if (returnBtn) returnBtn.style.display = 'none';
 }
 
 // Проверка URL на наличие ID сессии
@@ -668,6 +696,39 @@ function saveSession() {
     const url = new URL(window.location);
     url.searchParams.set('session', currentSession.id);
     window.history.pushState({}, '', url);
+  }
+}
+
+// Вернуться в активную сессию (для админа)
+function returnToSession() {
+  const saved = localStorage.getItem('retroSession');
+  if (saved) {
+    try {
+      const data = JSON.parse(saved);
+      if (data.isAdmin && data.session) {
+        currentSession = data.session;
+        currentUserId = data.userId;
+        isAdmin = data.isAdmin;
+        console.log('[WS] Returning to session from main menu:', { sessionId: currentSession.id, userId: currentUserId, isAdmin });
+        
+        showSessionPage();
+        
+        // Ждём подключения WebSocket
+        if (!socket?.connected) {
+          socket.once('connect', () => {
+            sendJoinToSession(currentSession.id);
+            loadSessionData();
+          });
+        } else {
+          sendJoinToSession(currentSession.id);
+          loadSessionData();
+        }
+      }
+    } catch (e) {
+      console.error('Error returning to session:', e);
+      localStorage.removeItem('retroSession');
+      showToast('Не удалось восстановить сессию', 'danger');
+    }
   }
 }
 
@@ -2626,6 +2687,9 @@ function goHome() {
   document.getElementById('home-page').classList.remove('d-none');
   document.getElementById('create-session-form').reset();
   document.getElementById('join-session-form').reset();
+  
+  // Проверяем наличие активной сессии и показываем кнопку "Вернуться в сессию"
+  checkActiveSession();
 }
 
 // Обработчик закрытия вкладки/браузера

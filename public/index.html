@@ -64,15 +64,31 @@
                         <span class="material-icons me-1">lock_open</span>
                         Ввести пароль
                       </button>
+                      <div id="active-session-notice" class="mt-3" style="display:none;">
+                        <div class="alert alert-info mb-0">
+                          <span class="material-icons me-2 align-middle">info</span>
+                          У вас есть активная сессия
+                          <button class="btn btn-sm btn-primary ms-2" onclick="returnToSession()">
+                            <span class="material-icons" style="font-size: 16px;">login</span>
+                            Вернуться в сессию
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div id="create-tab-unlocked" style="display:none;">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                       <h5 class="mb-0">🔓 Создание сессии</h5>
-                      <button class="btn btn-outline-secondary btn-sm" onclick="lockCreateTab()">
-                        <span class="material-icons" style="font-size: 16px;">lock</span>
-                        Закрыть
-                      </button>
+                      <div>
+                        <button class="btn btn-outline-primary btn-sm me-2" id="return-session-btn" onclick="returnToSession()" style="display:none;">
+                          <span class="material-icons" style="font-size: 16px;">login</span>
+                          Вернуться в сессию
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="lockCreateTab()">
+                          <span class="material-icons" style="font-size: 16px;">lock</span>
+                          Закрыть
+                        </button>
+                      </div>
                     </div>
                     <form id="create-session-form">
                     <div class="mb-3">
