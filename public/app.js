@@ -1338,6 +1338,9 @@ async function submitItem() {
 
     const item = await response.json();
 
+    // Добавляем элемент в UI сразу, не дожидаясь WebSocket события
+    addItemToColumn(item);
+
     const modal = bootstrap.Modal.getInstance(document.getElementById('addItemModal'));
     if (modal) modal.hide();
 
