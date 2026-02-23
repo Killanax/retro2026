@@ -5,11 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "start:sqlite": "cross-env DB_TYPE=sqlite node server.js",
-    "start:postgres": "cross-env DB_TYPE=postgres node server.js",
     "dev": "nodemon server.js",
-    "dev:sqlite": "cross-env DB_TYPE=sqlite nodemon server.js",
-    "dev:postgres": "cross-env DB_TYPE=postgres nodemon server.js",
     "docker:build": "docker build -t retro-board .",
     "docker:run": "docker run -p 3000:3000 retro-board",
     "docker:compose": "docker-compose up -d",
@@ -24,9 +20,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "better-sqlite3": "^11.0.0",
     "cors": "^2.8.6",
-    "cross-env": "^7.0.3",
+    "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "pg": "^8.11.3",
     "socket.io": "^4.8.3"

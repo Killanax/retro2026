@@ -99,15 +99,101 @@ body {
 }
 
 .column-items {
-  min-height: 80px;
+  min-height: 200px;
   transition: all 0.3s;
+  padding: 12px;
+  border-radius: 8px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .column-items.drag-over {
   background: #eef2ff;
-  border: 2px dashed var(--primary-color);
+  border: 3px dashed var(--primary-color);
   border-radius: 8px;
-  min-height: 100px;
+  min-height: 200px;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2);
+}
+
+/* Placeholder для пустых столбцов */
+.column-items-placeholder {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #9ca3af;
+  font-size: 1rem;
+  font-weight: 500;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.6;
+  transition: opacity 0.3s;
+  width: 100%;
+  text-align: center;
+  pointer-events: none;
+}
+
+.column-items-placeholder .icon {
+  font-size: 3rem;
+  line-height: 1;
+}
+
+.column-items.has-items .column-items-placeholder,
+.column-items-placeholder[style*="display: none"] {
+  display: none !important;
+}
+
+/* Усиливаем выделение пустого столбца при drag-over */
+.column-items.drag-over {
+  background: #eef2ff;
+  border: 3px dashed var(--primary-color);
+}
+
+.column-items.drag-over .column-items-placeholder {
+  opacity: 1;
+  color: var(--primary-color);
+}
+
+.column-items.drag-over .column-items-placeholder .icon {
+  animation: bounce 0.5s ease infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+/* Resize handle для столбцов */
+.retro-column {
+  position: relative;
+}
+
+.retro-column-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.retro-column:hover .retro-column-resize-handle {
+  opacity: 1;
+}
+
+.retro-column-resize-handle:hover,
+.retro-column-resize-handle.resizing {
+  opacity: 1;
+  background: rgba(99, 102, 241, 0.3);
+  border-left: 2px solid var(--primary-color);
 }
 
 .column-header {
@@ -164,13 +250,16 @@ body {
 .retro-item {
   background: white;
   border-radius: 8px;
-  padding: 8px;
+  padding: 10px;
   margin-bottom: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   transition: all 0.3s;
   border-left: 4px solid var(--primary-color);
   animation: slideIn 0.3s ease-out;
   cursor: grab;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  hyphens: auto;
 }
 
 .retro-item:active {
@@ -236,14 +325,29 @@ body {
   font-size: 0.875rem;
   color: #1f2937;
   margin-bottom: 8px;
-  line-height: 1.4;
+  line-height: 1.5;
   white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  word-break: break-word;
+  hyphens: auto;
+  overflow-x: hidden;
+}
+
+/* Ограничение высоты для длинного текста с прокруткой */
+.retro-item-text.long-text {
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 8px;
 }
 
 .retro-item-meme {
   max-width: 100%;
   border-radius: 6px;
   margin: 6px 0;
+  max-height: 300px;
+  object-fit: contain;
 }
 
 .retro-item-emoji {
@@ -397,7 +501,7 @@ body {
 /* Уведомления */
 .toast-container {
   position: fixed;
-  top: 20px;
+  bottom: 20px;
   right: 20px;
   z-index: 9999;
 }
@@ -538,9 +642,61 @@ body {
   background: #e5e7eb;
 }
 
+.item-action-btn.split {
+  background: #e0f2fe;
+  color: #0284c7;
+}
+
+.item-action-btn.split:hover {
+  background: #bae6fd;
+}
+
 .item-action-btn.delete:hover {
   background: #fee2e2;
   color: #ef4444;
+}
+
+/* Бейдж объединённой карточки */
+.merged-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  background: #fef3c7;
+  border: 1px solid #fbbf24;
+  border-radius: 10px;
+  color: #92400e;
+  cursor: help;
+}
+
+/* Стиль для объединённых карточек */
+.merged-item {
+  border-left-width: 6px;
+  border-left-color: #f59e0b !important;
+}
+
+/* Разделитель в карточке */
+.item-divider {
+  border: none;
+  border-top: 2px dashed #d1d5db;
+  margin: 12px 0;
+}
+
+/* Смешанный контент (текст + картинки) */
+.retro-item-mixed-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.retro-item-mixed-content .retro-item-text {
+  margin: 0;
+}
+
+.retro-item-mixed-content .retro-item-meme {
+  max-width: 100%;
+  border-radius: 6px;
+  margin: 0;
 }
 
 /* Выпадающий список смайлов */
@@ -863,17 +1019,44 @@ body {
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
 }
 
+/* Модальное окно разделения карточек */
+#split-parts-list .form-check {
+  max-width: 100%;
+  overflow: hidden;
+}
+
+#split-parts-list .text-muted {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  max-width: 100%;
+}
+
+.split-part-preview {
+  max-height: 80px;
+  overflow-y: auto;
+  background: #f8f9fa;
+  padding: 8px;
+  border-radius: 4px;
+  margin-top: 4px;
+  font-size: 0.8rem;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  max-width: 100%;
+}
+
 /* Адаптивность для мобильных */
 @media (max-width: 1024px) {
   #columns-container {
     flex-direction: column;
   }
-  
+
   .retro-column {
     min-width: 100%;
     max-width: 100%;
   }
-  
+
   .timer-time {
     font-size: 1.75rem;
   }

@@ -1,3 +1,4 @@
+require('dotenv').config({ override: true });
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -149,15 +150,17 @@ app.get('/api/sessions/:id/items/:itemId', async (req, res) => {
 
 // Добавить идею
 app.post('/api/sessions/:id/items', async (req, res) => {
-  const { text, category, author, type, order } = req.body;
+  const { text, category, author, type, order, reactions, user_reactions } = req.body;
   const sessionId = req.params.id;
   const id = uuidv4();
 
   try {
     await pool.query(
-      `INSERT INTO items (id, session_id, text, category, author, type, "order")
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [id, sessionId, text, category || 'general', author || 'Anonymous', type || 'text', order || 0]
+      `INSERT INTO items (id, session_id, text, category, author, type, "order", reactions, user_reactions)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [id, sessionId, text, category || 'general', author || 'Anonymous', type || 'text', order || 0, 
+       reactions ? (typeof reactions === 'string' ? reactions : JSON.stringify(reactions)) : null,
+       user_reactions ? (typeof user_reactions === 'string' ? user_reactions : JSON.stringify(user_reactions)) : null]
     );
     const result = await pool.query('SELECT * FROM items WHERE id = $1', [id]);
     const newItem = result.rows[0];
@@ -170,7 +173,7 @@ app.post('/api/sessions/:id/items', async (req, res) => {
 
 // Обновить идею (голосование, статус, категория для drag-n-drop, порядок)
 app.patch('/api/sessions/:id/items/:itemId', async (req, res) => {
-  const { votes, status, category, text, order } = req.body;
+  const { votes, status, category, text, order, reactions, user_reactions, merged_parts_data, type, meme_url } = req.body;
   const { id: sessionId, itemId } = req.params;
 
   const updates = [];
@@ -196,6 +199,26 @@ app.patch('/api/sessions/:id/items/:itemId', async (req, res) => {
   if (order !== undefined) {
     updates.push(`"order" = $${paramIndex++}`);
     params.push(order);
+  }
+  if (reactions !== undefined) {
+    updates.push(`reactions = $${paramIndex++}`);
+    params.push(typeof reactions === 'string' ? reactions : JSON.stringify(reactions));
+  }
+  if (user_reactions !== undefined) {
+    updates.push(`user_reactions = $${paramIndex++}`);
+    params.push(typeof user_reactions === 'string' ? user_reactions : JSON.stringify(user_reactions));
+  }
+  if (merged_parts_data !== undefined) {
+    updates.push(`merged_parts_data = $${paramIndex++}`);
+    params.push(merged_parts_data === null ? null : (typeof merged_parts_data === 'string' ? merged_parts_data : JSON.stringify(merged_parts_data)));
+  }
+  if (type !== undefined) {
+    updates.push(`type = $${paramIndex++}`);
+    params.push(type);
+  }
+  if (meme_url !== undefined) {
+    updates.push(`meme_url = $${paramIndex++}`);
+    params.push(meme_url);
   }
 
   if (updates.length === 0) {
@@ -724,6 +747,17 @@ async function startServer() {
   await initDatabase();
   await loadMemesFromDb();
   
+  // Миграция: добавляем колонку merged_parts_data если её нет
+  try {
+    await pool.query(`
+      ALTER TABLE items 
+      ADD COLUMN IF NOT EXISTS merged_parts_data TEXT
+    `);
+    console.log('✅ Migration: merged_parts_data column added');
+  } catch (err) {
+    console.error('⚠️ Migration error:', err.message);
+  }
+
   server.listen(PORT, () => {
     console.log(`🚀 Retro server running on http://localhost:${PORT}`);
   });
