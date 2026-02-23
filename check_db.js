@@ -1,16 +1,33 @@
-const Database = require('better-sqlite3');
-const db = new Database('retro.db', { readonly: true });
+require('dotenv').config();
+const { Pool } = require('pg');
 
-try {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
-  console.log('Таблицы:', tables);
-  
-  for (const table of tables) {
-    const name = table.name;
-    console.log(`\n=== Таблица: ${name} ===`);
-    const rows = db.prepare(`SELECT * FROM ${name} LIMIT 10`).all();
-    console.log(rows);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+async function checkDatabase() {
+  const client = await pool.connect();
+  try {
+    const tables = await client.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      ORDER BY table_name
+    `);
+
+    console.log('Таблицы:', tables.rows.map(r => r.table_name));
+
+    for (const table of tables.rows) {
+      const name = table.table_name;
+      console.log(`\n=== Таблица: ${name} ===`);
+      const rows = await client.query(`SELECT * FROM ${name} LIMIT 10`);
+      console.log(rows.rows);
+    }
+  } finally {
+    client.release();
+    await pool.end();
   }
-} finally {
-  db.close();
 }
+
+checkDatabase().catch(console.error);

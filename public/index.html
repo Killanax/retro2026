@@ -589,24 +589,27 @@
     </div>
   </div>
 
-  <!-- Модальное окно редактирования заголовка колонки -->
-  <div class="modal fade" id="editColumnModal" tabindex="-1">
-    <div class="modal-dialog modal-sm">
+  <!-- Модальное окно разъединения карточки -->
+  <div class="modal fade" id="splitItemModal" tabindex="-1">
+    <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title">Редактировать заголовок</h5>
+          <h5 class="modal-title">Разъединить карточку</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <input type="hidden" id="edit-column-category">
-          <div class="mb-3">
-            <label class="form-label">Название колонки</label>
-            <input type="text" class="form-control" id="edit-column-title" placeholder="Введите название">
+          <p class="text-muted mb-3">Выберите части для отделения в отдельные карточки:</p>
+          <div id="split-parts-list">
+            <!-- Список частей генерируется через JS -->
+          </div>
+          <div class="form-text">
+            <span class="material-icons" style="font-size: 14px; vertical-align: middle;">info</span>
+            Невыбранные части останутся в текущей карточке
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-          <button type="button" class="btn btn-primary" onclick="saveColumnTitle()">Сохранить</button>
+          <button type="button" class="btn btn-primary" onclick="confirmSplitItem()">Разъединить</button>
         </div>
       </div>
     </div>
