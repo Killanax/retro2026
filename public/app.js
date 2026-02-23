@@ -1001,6 +1001,10 @@ function renderColumns() {
           <span class="column-badge" id="badge-${col.category}">0</span>
         </div>
         <div class="column-items" id="column-${col.category}" data-category="${col.category}" ${columnItemsDragAttrs}>
+          <div class="column-items-placeholder" data-category="${col.category}">
+            <span class="icon">📥</span>
+            <span>Перетащите карточку сюда</span>
+          </div>
         </div>
         <button class="add-item-btn mt-3"
                 data-category="${col.category}"
@@ -1008,9 +1012,13 @@ function renderColumns() {
           <span class="material-icons">add</span>
           Добавить элемент
         </button>
+        <div class="retro-column-resize-handle" data-category="${col.category}"></div>
       </div>
     `;
   }).join('');
+
+  // Инициализация resize handle для столбцов
+  initColumnResize();
 }
 
 // Открытие модального окна добавления
@@ -1432,8 +1440,15 @@ function addItemToColumn(item) {
     return;
   }
 
+  // Проверяем, нет ли уже такого элемента в DOM (предотвращение дубликатов)
+  const existingElement = document.getElementById(`item-${item.id}`);
+  if (existingElement) {
+    console.log('[UI] Item already exists in DOM, skipping:', item.id);
+    return;
+  }
+
   console.log('[UI] Adding item to column:', { id: item.id, category: item.category, text: item.text?.substring(0, 50) });
-  
+
   updateColumnCount(item.category);
 
   const itemHtml = createItemHtml(item);
@@ -1474,10 +1489,40 @@ function createItemHtml(item) {
     content = `<div class="retro-item-emoji">${item.text}</div>`;
   } else {
     // Преобразуем \n в <br> для отображения переносов строк
-    const textWithBreaks = escapeHtml(item.text)
-      .replace(/!\[(.*?)\]\((.*?)\)/g, '<img src="$2" alt="$1" class="retro-item-meme">')
-      .replace(/\n/g, '<br>');
-    content = `<p class="retro-item-text">${textWithBreaks}</p>`;
+    // Сначала обрабатываем markdown-картинки ![alt](url)
+    let processedText = escapeHtml(item.text);
+
+    // Проверяем, есть ли в тексте markdown-картинки
+    const hasMarkdownImages = /!\[(.*?)\]\((.*?)\)/g.test(processedText);
+
+    // Класс для длинного текста (с прокруткой)
+    const textClass = item.text && item.text.length > 300 ? 'retro-item-text long-text' : 'retro-item-text';
+
+    if (hasMarkdownImages) {
+      // Если есть картинки, рендерим как смешанный контент
+      const parts = processedText.split(/(!\[.*?\]\(.*?\))/g);
+      content = '<div class="retro-item-mixed-content">';
+      parts.forEach(part => {
+        const imgMatch = part.match(/!\[(.*?)\]\((.*?)\)/);
+        if (imgMatch) {
+          content += `<img src="${imgMatch[2]}" alt="${imgMatch[1]}" class="retro-item-meme">`;
+        } else {
+          // Обрабатываем переносы строк и разделители
+          const textPart = part
+            .replace(/─────────────/g, '<hr class="item-divider">')
+            .replace(/\n/g, '<br>');
+          if (textPart.trim()) {
+            content += `<p class="${textClass}">${textPart}</p>`;
+          }
+        }
+      });
+      content += '</div>';
+    } else {
+      // Простой текст без картинок
+      const textWithBreaks = processedText
+        .replace(/\n/g, '<br>');
+      content = `<p class="${textClass}">${textWithBreaks}</p>`;
+    }
   }
   
   // Фильтруем только те реакции, которые имеют count > 0
@@ -1518,23 +1563,40 @@ function createItemHtml(item) {
   `;
   
   reactionsHtml += '</div>';
-  
+
+  // Проверяем, является ли карточка объединённой (содержит разделитель)
+  const isMerged = item.text && item.text.includes('─────────────');
+  const mergedBadge = isMerged ? `<span class="merged-badge" title="Объединённая карточка (можно разъединить)"><span class="material-icons" style="font-size: 12px;">call_merge</span></span>` : '';
+
+  // Кнопка разделения показывается только для объединённых карточек
+  const splitButton = (isAdmin && isMerged) ? `
+    <button class="item-action-btn split" onclick="splitItem('${item.id}')" title="Разъединить карточку">
+      <span class="material-icons" style="font-size: 16px;">call_split</span>
+    </button>
+  ` : '';
+
   return `
-    <div class="retro-item status-${item.status}" id="item-${item.id}" data-id="${item.id}" data-order="${item.order || 0}" draggable="true">
+    <div class="retro-item status-${item.status} ${isMerged ? 'merged-item' : ''}" id="item-${item.id}" data-id="${item.id}" data-order="${item.order || 0}" draggable="true">
       <div class="retro-item-header">
         <span class="retro-item-author">
           <span class="material-icons" style="font-size: 14px;">person</span>
           ${escapeHtml(author)}
         </span>
-        <small class="text-muted">${new Date(item.created_at).toLocaleString()}</small>
+        <div style="display: flex; align-items: center; gap: 4px;">
+          ${mergedBadge}
+          <small class="text-muted">${new Date(item.created_at).toLocaleString()}</small>
+        </div>
       </div>
       ${content}
       <div class="retro-item-footer">
         ${reactionsHtml}
         <div class="item-actions">
-          ${isAdmin ? `<button class="item-action-btn delete" onclick="deleteItem('${item.id}')" title="Удалить">
-            <span class="material-icons" style="font-size: 16px;">delete</span>
-          </button>` : ''}
+          ${isAdmin ? `
+            ${splitButton}
+            <button class="item-action-btn delete" onclick="deleteItem('${item.id}')" title="Удалить">
+              <span class="material-icons" style="font-size: 16px;">delete</span>
+            </button>
+          ` : ''}
         </div>
       </div>
     </div>
@@ -1555,6 +1617,53 @@ function toggleEmojiDropdown(event, itemId) {
   const menu = document.getElementById(`emoji-menu-${itemId}`);
   if (menu) {
     menu.classList.toggle('show');
+    
+    // Позиционируем dropdown так, чтобы он не выходил за границы экрана
+    if (menu.classList.contains('show')) {
+      const button = event.target.closest('.emoji-dropdown-btn');
+      if (button) {
+        // Сначала устанавливаем базовую позицию (по центру кнопки)
+        menu.style.left = '50%';
+        menu.style.transform = 'translateX(-50%)';
+        
+        // Ждем следующего кадра, чтобы получить размеры элемента
+        setTimeout(() => {
+          const rect = menu.getBoundingClientRect();
+          const buttonRect = button.getBoundingClientRect();
+          
+          // Вычисляем доступное пространство слева и справа от кнопки
+          const spaceLeft = buttonRect.left;
+          const spaceRight = window.innerWidth - buttonRect.right;
+          
+          // Ширина dropdown-меню
+          const menuWidth = rect.width;
+          
+          // Определяем, нужно ли корректировать позицию
+          let adjustedPosition = '50%';
+          
+          // Если выпадающее меню выходит за правую границу экрана
+          if (rect.right > window.innerWidth) {
+            // Выравниваем по правому краю кнопки
+            adjustedPosition = '100%';
+            menu.style.left = adjustedPosition;
+            menu.style.transform = 'translateX(calc(-100% - 8px))'; // 8px отступ от края кнопки
+          } 
+          // Если выпадающее меню выходит за левую границу экрана
+          else if (rect.left < 0) {
+            // Выравниваем по левому краю кнопки
+            adjustedPosition = '0%';
+            menu.style.left = adjustedPosition;
+            menu.style.transform = 'translateX(8px)'; // 8px отступ от края кнопки
+          } 
+          // Если выпадающее меню помещается нормально
+          else {
+            // Оставляем по центру
+            menu.style.left = '50%';
+            menu.style.transform = 'translateX(-50%)';
+          }
+        }, 1);
+      }
+    }
   }
 }
 
@@ -1779,12 +1888,18 @@ function handleColumnDragOver(e, category) {
   e.preventDefault();
   e.stopPropagation();
   e.dataTransfer.dropEffect = 'move';
-  this.classList.add('drag-over');
+  const columnItems = e.currentTarget;
+  if (columnItems) {
+    columnItems.classList.add('drag-over');
+  }
 }
 
 function handleColumnDragLeave(e) {
   e.stopPropagation();
-  this.classList.remove('drag-over');
+  const columnItems = e.currentTarget;
+  if (columnItems) {
+    columnItems.classList.remove('drag-over');
+  }
 }
 
 // Обработчики для кнопки "Добавить элемент"
@@ -1818,7 +1933,10 @@ function handleDropOnButton(e, category) {
 function handleDrop(e, category) {
   e.preventDefault();
   e.stopPropagation();
-  this.classList.remove('drag-over');
+  const columnItems = e.currentTarget;
+  if (columnItems) {
+    columnItems.classList.remove('drag-over');
+  }
 
   if (!draggedItemId || !category) return;
 
@@ -1828,6 +1946,52 @@ function handleDrop(e, category) {
   if (oldCategory === category) return;
 
   moveItemToCategory(draggedItemId, category);
+}
+
+// ==================== ИЗМЕНЕНИЕ РАЗМЕРА СТОЛБЦОВ ====================
+
+// Инициализация изменения размера столбцов
+function initColumnResize() {
+  const resizeHandles = document.querySelectorAll('.retro-column-resize-handle');
+  
+  resizeHandles.forEach(handle => {
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+    let column = null;
+
+    handle.addEventListener('mousedown', (e) => {
+      isResizing = true;
+      column = handle.closest('.retro-column');
+      startX = e.pageX;
+      startWidth = column.offsetWidth;
+      handle.classList.add('resizing');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing || !column) return;
+      
+      const width = startWidth + (e.pageX - startX);
+      if (width >= 250 && width <= 800) {
+        column.style.width = width + 'px';
+        column.style.minWidth = width + 'px';
+        column.style.maxWidth = width + 'px';
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (isResizing) {
+        isResizing = false;
+        handle.classList.remove('resizing');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        column = null;
+      }
+    });
+  });
 }
 
 // Перемещение карточки в другую категорию
@@ -1933,7 +2097,85 @@ async function mergeItems(sourceElement, targetElement) {
       }
     }
 
-    const updateData = { text: mergedText };
+    // Парсим реакции target карточки
+    let targetReactions = {};
+    let targetUserReactions = {};
+    try {
+      targetReactions = targetItem.reactions ? (typeof targetItem.reactions === 'string' ? JSON.parse(targetItem.reactions) : targetItem.reactions) : {};
+      targetUserReactions = targetItem.user_reactions ? (typeof targetItem.user_reactions === 'string' ? JSON.parse(targetItem.user_reactions) : targetItem.user_reactions) : {};
+    } catch (e) {
+      console.warn('Failed to parse target reactions:', e);
+    }
+
+    // Парсим реакции source карточки
+    let sourceReactions = {};
+    let sourceUserReactions = {};
+    try {
+      sourceReactions = sourceItem.reactions ? (typeof sourceItem.reactions === 'string' ? JSON.parse(sourceItem.reactions) : sourceItem.reactions) : {};
+      sourceUserReactions = sourceItem.user_reactions ? (typeof sourceItem.user_reactions === 'string' ? JSON.parse(sourceItem.user_reactions) : sourceItem.user_reactions) : {};
+    } catch (e) {
+      console.warn('Failed to parse source reactions:', e);
+    }
+
+    // Суммируем реакции для отображения на объединённой карточке
+    let mergedReactions = {};
+    for (const [name, count] of Object.entries(targetReactions)) {
+      mergedReactions[name] = (mergedReactions[name] || 0) + count;
+    }
+    for (const [name, count] of Object.entries(sourceReactions)) {
+      mergedReactions[name] = (mergedReactions[name] || 0) + count;
+    }
+
+    // Объединяем user_reactions (приоритет у source, если есть конфликт)
+    let mergedUserReactions = { ...targetUserReactions, ...sourceUserReactions };
+
+    // Сохраняем данные о каждой части для последующего разделения
+    // Получаем существующие части или создаём новые
+    let mergedPartsData = [];
+    try {
+      if (targetItem.merged_parts_data) {
+        mergedPartsData = typeof targetItem.merged_parts_data === 'string'
+          ? JSON.parse(targetItem.merged_parts_data)
+          : targetItem.merged_parts_data;
+      }
+    } catch (e) {
+      console.warn('Failed to parse existing merged_parts_data:', e);
+      mergedPartsData = [];
+    }
+
+    // Всегда сохраняем текущие данные target карточки как первую часть
+    // Это нужно, даже если merged_parts_data уже существует (карточка уже была объединена)
+    const targetPartData = {
+      text: targetItem.text || '',
+      reactions: targetReactions,
+      user_reactions: targetUserReactions,
+      meme_url: targetItem.meme_url,
+      type: targetItem.type
+    };
+    
+    // Если merged_parts_data пуст, добавляем target как первую часть
+    if (mergedPartsData.length === 0) {
+      mergedPartsData.push(targetPartData);
+    } else {
+      // Если уже есть части, заменяем первую на актуальные данные target
+      mergedPartsData[0] = targetPartData;
+    }
+
+    // Добавляем source как новую часть
+    mergedPartsData.push({
+      text: sourceItem.text || '',
+      reactions: sourceReactions,
+      user_reactions: sourceUserReactions,
+      meme_url: sourceItem.meme_url,
+      type: sourceItem.type
+    });
+
+    const updateData = {
+      text: mergedText,
+      reactions: JSON.stringify(mergedReactions),
+      user_reactions: JSON.stringify(mergedUserReactions),
+      merged_parts_data: JSON.stringify(mergedPartsData)
+    };
 
     if (sourceItem.type === 'meme' && !targetItem.meme_url) {
       updateData.meme_url = sourceItem.meme_url;
@@ -1998,6 +2240,392 @@ async function toggleReaction(itemId, emoji, reactionName) {
   } catch (error) {
     console.error('Error toggling reaction:', error);
   }
+}
+
+// Разъединение карточки (разделение на отдельные карточки)
+// Открывает модальное окно для выбора какой фрагмент отделить
+async function splitItem(itemId) {
+  if (!currentSession) return;
+
+  try {
+    const response = await fetch(`/api/sessions/${currentSession.id}/items/${itemId}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch item');
+    }
+
+    const item = await response.json();
+
+    // Проверяем, есть ли в тексте разделители
+    const hasDivider = item.text && item.text.includes('─────────────');
+
+    if (!hasDivider) {
+      showToast('Эту карточку нельзя разъединить', 'info');
+      return;
+    }
+
+    // Разделяем текст по разделителю
+    const parts = item.text.split(/\n\n─────────────\n\n/).filter(p => p.trim());
+
+    if (parts.length < 2) {
+      showToast('Нечего разъединять', 'info');
+      return;
+    }
+
+    // Сохраняем информацию для модального окна
+    window.splitItemData = {
+      itemId: itemId,
+      item: item,
+      parts: parts
+    };
+
+    // Показываем модальное окно выбора
+    showSplitModal(parts);
+  } catch (error) {
+    console.error('Error splitting item:', error);
+    showToast('Ошибка разъединения', 'danger');
+  }
+}
+
+// Показ модального окна для выбора фрагмента
+function showSplitModal(parts) {
+  const modal = new bootstrap.Modal(document.getElementById('splitItemModal'));
+
+  // Генерируем список частей для выбора
+  const listContainer = document.getElementById('split-parts-list');
+  if (listContainer) {
+    // Добавляем чекбокс "Выбрать всё"
+    let html = `
+      <div class="split-part-item">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="select-all-parts" onchange="toggleSelectAllParts(this)">
+          <label class="form-check-label" for="select-all-parts">
+            <strong>Выбрать все части</strong>
+          </label>
+        </div>
+      </div>
+    `;
+    
+    // Добавляем чекбоксы для каждой части
+    html += parts.map((part, index) => {
+      // Обрезаем текст для предпросмотра, но сохраняем переносы строк
+      const previewLength = 150;
+      let previewText = part;
+      let isTruncated = false;
+      
+      // Если текст очень длинный, обрезаем его
+      if (part.length > previewLength) {
+        previewText = part.substring(0, previewLength);
+        isTruncated = true;
+      }
+      
+      // Экранируем HTML и заменяем разделители на текст
+      const escapedText = escapeHtml(previewText)
+        .replace(/─────────────/g, '<br><strong>─── РАЗДЕЛИТЕЛЬ ───</strong><br>');
+      
+      return `
+        <div class="split-part-item">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" value="${index}" id="split-part-${index}" onchange="updateSelectAllState()">
+            <label class="form-check-label" for="split-part-${index}">
+              <div class="d-flex justify-content-between align-items-center w-100">
+                <div>
+                  <strong>Часть ${index + 1}</strong>
+                  <div class="split-part-preview">${escapedText}${isTruncated ? '...' : ''}</div>
+                </div>
+                <span class="badge bg-secondary">${part.length} симв.</span>
+              </div>
+            </label>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    listContainer.innerHTML = html;
+  }
+
+  modal.show();
+}
+
+// Функция для обработки чекбокса "Выбрать всё"
+function toggleSelectAllParts(checkbox) {
+  const isChecked = checkbox.checked;
+  const individualCheckboxes = document.querySelectorAll('#split-parts-list .form-check-input:not(#select-all-parts)');
+  individualCheckboxes.forEach(cb => {
+    cb.checked = isChecked;
+    // Trigger change event to update the UI properly
+    cb.dispatchEvent(new Event('change'));
+  });
+}
+
+// Функция для обновления состояния чекбокса "Выбрать всё"
+function updateSelectAllState() {
+  const allCheckboxes = document.querySelectorAll('#split-parts-list .form-check-input:not(#select-all-parts)');
+  const checkedBoxes = document.querySelectorAll('#split-parts-list .form-check-input:not(#select-all-parts):checked');
+  const selectAllCheckbox = document.getElementById('select-all-parts');
+  
+  if (selectAllCheckbox) {
+    selectAllCheckbox.checked = allCheckboxes.length > 0 && allCheckboxes.length === checkedBoxes.length;
+  }
+}
+
+// Функция для обновления состояния индивидуальных чекбоксов при изменении "Выбрать всё"
+function updateIndividualCheckboxesState() {
+  const selectAllCheckbox = document.getElementById('select-all-parts');
+  const individualCheckboxes = document.querySelectorAll('#split-parts-list .form-check-input:not(#select-all-parts)');
+  
+  if (selectAllCheckbox) {
+    const isSelectAllChecked = selectAllCheckbox.checked;
+    individualCheckboxes.forEach(checkbox => {
+      checkbox.checked = isSelectAllChecked;
+    });
+  }
+}
+
+// Выполнение разъединения выбранных частей
+async function confirmSplitItem() {
+  if (!window.splitItemData) return;
+
+  const { itemId, item, parts } = window.splitItemData;
+  
+  // Получаем выбранные части
+  const selectedIndices = [];
+  document.querySelectorAll('#split-parts-list input[type="checkbox"]:checked').forEach(checkbox => {
+    selectedIndices.push(parseInt(checkbox.value, 10));
+  });
+
+  if (selectedIndices.length === 0) {
+    showToast('Выберите хотя бы одну часть', 'warning');
+    return;
+  }
+
+  if (selectedIndices.length === parts.length && selectedIndices.every((v, i) => v === i)) {
+    // Если выбраны все части - разъединяем все
+    await splitAllParts(itemId, item, parts);
+  } else {
+    // Разъединяем только выбранные
+    await splitSelectedParts(itemId, item, parts, selectedIndices);
+  }
+
+  // Закрываем модальное окно
+  const modal = bootstrap.Modal.getInstance(document.getElementById('splitItemModal'));
+  if (modal) modal.hide();
+
+  // Очищаем данные
+  window.splitItemData = null;
+}
+
+// Найти данные части по тексту (сопоставление по содержимому, а не по индексу)
+function findPartDataByText(text, mergedPartsData) {
+  const trimmedText = text.trim();
+  
+  // Ищем точное совпадение текста
+  let partData = mergedPartsData.find(p => p.text && p.text.trim() === trimmedText);
+  if (partData) return partData;
+  
+  // Ищем совпадение по подстроке (на случай если текст был немного изменён)
+  partData = mergedPartsData.find(p => p.text && p.text.trim().includes(trimmedText));
+  if (partData) return partData;
+  
+  // Ищем обратное совпадение (если текст был дополнен)
+  partData = mergedPartsData.find(p => p.text && trimmedText.includes(p.text.trim()));
+  if (partData) return partData;
+  
+  // Ищем по первому предложению/строке (для случаев когда текст обрезан)
+  const textFirstLine = trimmedText.split('\n')[0].trim();
+  partData = mergedPartsData.find(p => p.text && p.text.trim().split('\n')[0].trim() === textFirstLine);
+  if (partData) return partData;
+  
+  // Для emoji-карточек ищем по содержимому (без пробелов)
+  const textNoSpaces = trimmedText.replace(/\s+/g, '');
+  partData = mergedPartsData.find(p => p.text && p.text.replace(/\s+/g, '') === textNoSpaces);
+  if (partData) return partData;
+  
+  // Возвращаем пустые данные если не нашли совпадений
+  return { reactions: {}, user_reactions: {}, type: 'text', meme_url: null };
+}
+
+// Разъединение всех частей (старая логика)
+async function splitAllParts(itemId, item, parts) {
+  const element = document.getElementById(`item-${itemId}`);
+  const column = element?.closest('.column-items');
+  const category = column?.dataset.category || item.category;
+  const baseOrder = item.order || 0;
+
+  // Пытаемся получить сохранённые данные о частях
+  let mergedPartsData = [];
+  try {
+    if (item.merged_parts_data) {
+      mergedPartsData = typeof item.merged_parts_data === 'string'
+        ? JSON.parse(item.merged_parts_data)
+        : item.merged_parts_data;
+    }
+  } catch (e) {
+    console.warn('Failed to parse merged_parts_data:', e);
+  }
+
+  // Создаём новые карточки для каждой части
+  const newItemsPromises = [];
+  for (let i = 0; i < parts.length; i++) {
+    const newOrder = baseOrder + i;
+    const partText = parts[i].trim();
+
+    // Ищем сохранённые данные для этой части по тексту (а не по индексу)
+    const partData = findPartDataByText(partText, mergedPartsData);
+    const partReactions = partData.reactions || {};
+    const partUserReactions = partData.user_reactions || {};
+
+    const promise = fetch(`/api/sessions/${currentSession.id}/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: partText,
+        category: category,
+        author: item.author || 'Аноним',
+        type: partData.type || 'text',
+        meme_url: partData.meme_url || null,
+        order: newOrder,
+        reactions: JSON.stringify(partReactions),
+        user_reactions: JSON.stringify(partUserReactions)
+      })
+    });
+
+    newItemsPromises.push(promise);
+  }
+
+  // Создаём все новые карточки параллельно
+  await Promise.all(newItemsPromises);
+
+  // Удаляем исходную объединённую карточку
+  await fetch(`/api/sessions/${currentSession.id}/items/${itemId}`, {
+    method: 'DELETE'
+  });
+
+  showToast(`Карточка разъединена на ${parts.length} части!`, 'success');
+}
+
+// Разъединение выбранных частей
+async function splitSelectedParts(itemId, item, parts, selectedIndices) {
+  const element = document.getElementById(`item-${itemId}`);
+  const column = element?.closest('.column-items');
+  const category = column?.dataset.category || item.category;
+  const baseOrder = item.order || 0;
+
+  // Пытаемся получить сохранённые данные о частях
+  let mergedPartsData = [];
+  try {
+    if (item.merged_parts_data) {
+      mergedPartsData = typeof item.merged_parts_data === 'string'
+        ? JSON.parse(item.merged_parts_data)
+        : item.merged_parts_data;
+    }
+  } catch (e) {
+    console.warn('Failed to parse merged_parts_data:', e);
+    // Если не удалось распарсить, создаем массив с пустыми объектами
+    mergedPartsData = parts.map(() => ({ reactions: {}, user_reactions: {} }));
+  }
+
+  // Собираем текст для исходной карточки (невыбранные части)
+  const unselectedParts = parts.filter((_, index) => !selectedIndices.includes(index));
+  const selectedParts = selectedIndices.map(i => parts[i]);
+
+  // Создаём новые карточки для выбранных частей с их оригинальными реакциями
+  const newItemsPromises = [];
+  for (let i = 0; i < selectedParts.length; i++) {
+    const newOrder = baseOrder + i + 1;
+    const partText = selectedParts[i].trim();
+
+    // Ищем сохранённые данные для этой части по тексту (а не по индексу)
+    const partData = findPartDataByText(partText, mergedPartsData);
+    const partReactions = partData.reactions || {};
+    const partUserReactions = partData.user_reactions || {};
+    const partType = partData.type || 'text';
+    const partMemeUrl = partData.meme_url || null;
+
+    const promise = fetch(`/api/sessions/${currentSession.id}/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: partText,
+        category: category,
+        author: item.author || 'Аноним',
+        type: partType,
+        meme_url: partMemeUrl,
+        order: newOrder,
+        reactions: JSON.stringify(partReactions),
+        user_reactions: JSON.stringify(partUserReactions)
+      })
+    });
+
+    newItemsPromises.push(promise);
+  }
+
+  // Создаём все новые карточки параллельно
+  await Promise.all(newItemsPromises);
+
+  // Если остались неразделенные части, обновляем исходную карточку
+  if (unselectedParts.length > 0) {
+    // Обновляем исходную карточку с оставшимися частями и их реакциями
+    const remainingText = unselectedParts.join('\n\n─────────────\n\n');
+
+    // Собираем реакции для оставшихся частей
+    let remainingReactions = {};
+    let remainingUserReactions = {};
+    let remainingType = 'text';
+    let remainingMemeUrl = null;
+
+    // Если осталась одна часть - используем её данные
+    if (unselectedParts.length === 1) {
+      const remainingPartData = findPartDataByText(unselectedParts[0], mergedPartsData);
+      remainingReactions = remainingPartData.reactions || {};
+      remainingUserReactions = remainingPartData.user_reactions || {};
+      remainingType = remainingPartData.type || 'text';
+      remainingMemeUrl = remainingPartData.meme_url || null;
+    } else {
+      // Если несколько частей - суммируем реакции
+      for (const unselectedPart of unselectedParts) {
+        const partData = findPartDataByText(unselectedPart, mergedPartsData);
+        const partReactions = partData.reactions || {};
+        const partUserReactions = partData.user_reactions || {};
+
+        // Суммируем реакции
+        for (const [name, count] of Object.entries(partReactions)) {
+          remainingReactions[name] = (remainingReactions[name] || 0) + count;
+        }
+        remainingUserReactions = { ...remainingUserReactions, ...partUserReactions };
+
+        if (partData.type === 'meme' && !remainingMemeUrl) {
+          remainingMemeUrl = partData.meme_url;
+          remainingType = 'meme';
+        }
+      }
+    }
+    
+    await fetch(`/api/sessions/${currentSession.id}/items/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: remainingText.trim(),
+        order: baseOrder,
+        type: remainingType,
+        meme_url: remainingMemeUrl,
+        reactions: JSON.stringify(remainingReactions),
+        user_reactions: JSON.stringify(remainingUserReactions),
+        merged_parts_data: unselectedParts.length > 1 ? JSON.stringify(
+          unselectedParts.map(part => {
+            // Найти данные части по тексту
+            return findPartDataByText(part, mergedPartsData);
+          })
+        ) : null
+      })
+    });
+  } else {
+    // Если не осталось частей, удаляем карточку
+    await fetch(`/api/sessions/${currentSession.id}/items/${itemId}`, {
+      method: 'DELETE'
+    });
+ }
+
+  showToast(`Отделено ${selectedParts.length} части(ей)!`, 'success');
 }
 
 // Обновление элемента
@@ -2186,11 +2814,20 @@ async function deleteItem(itemId) {
 function updateColumnCount(category) {
   const column = document.getElementById(`column-${category}`);
   if (!column) return;
-  
+
   const count = column.querySelectorAll('.retro-item').length;
   const badge = document.getElementById(`badge-${category}`);
   if (badge) {
     badge.textContent = count;
+  }
+
+  // Показываем/скрываем placeholder
+  if (count > 0) {
+    column.classList.add('has-items');
+    column.querySelector('.column-items')?.classList.add('has-items');
+  } else {
+    column.classList.remove('has-items');
+    column.querySelector('.column-items')?.classList.remove('has-items');
   }
 }
 
