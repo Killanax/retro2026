@@ -597,10 +597,15 @@ function initSocket() {
   // Обновление плана действий в реальном времени
   socket.on('action-plan:update', (data) => {
     const { itemId, action_plan_text, action_plan_who, action_plan_when } = data;
-    
+
+    console.log('[ActionPlan WS] Received update:', { itemId, action_plan_text: action_plan_text?.substring(0, 30), action_plan_who, action_plan_when });
+
     // Не обновляем если это наши изменения
-    if (currentUserId && data.userId === currentUserId) return;
-    
+    if (currentUserId && data.userId === currentUserId) {
+      console.log('[ActionPlan WS] Skipping - our own update');
+      return;
+    }
+
     // Обновляем в currentSession
     const item = currentSession?.items?.find(i => i.id === itemId);
     if (item) {
@@ -608,26 +613,42 @@ function initSocket() {
       if (action_plan_who !== undefined) item.action_plan_who = action_plan_who;
       if (action_plan_when !== undefined) item.action_plan_when = action_plan_when;
     }
-    
-    // Обновляем UI только если мы во вкладке обсуждения
-    if (currentTab === 'discussion') {
-      const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
-      const wrapper = editor?.closest('.discussion-item-plan') || editor?.closest('.action-plan-section');
-      const inputs = wrapper?.querySelectorAll(`input[data-item-id="${itemId}"]`) || [];
-      const whoInput = inputs[0];
-      const whenInput = inputs[1];
 
-      // Обновляем только если элемент не в фокусе
+    // Функция для обновления полей плана действий
+    function updateActionPlanFields(editor, whoInput, whenInput) {
       if (editor && document.activeElement !== editor && action_plan_text !== undefined) {
-        editor.innerHTML = action_plan_text || '';
+        if (editor.innerHTML !== (action_plan_text || '')) {
+          editor.innerHTML = action_plan_text || '';
+          console.log('[ActionPlan WS] Updated editor:', itemId);
+        }
       }
       if (whoInput && document.activeElement !== whoInput && action_plan_who !== undefined) {
-        whoInput.value = action_plan_who || '';
+        if (whoInput.value !== (action_plan_who || '')) {
+          whoInput.value = action_plan_who || '';
+          console.log('[ActionPlan WS] Updated who:', action_plan_who);
+        }
       }
       if (whenInput && document.activeElement !== whenInput && action_plan_when !== undefined) {
-        whenInput.value = action_plan_when || '';
+        if (whenInput.value !== (action_plan_when || '')) {
+          whenInput.value = action_plan_when || '';
+          console.log('[ActionPlan WS] Updated when:', action_plan_when);
+        }
       }
     }
+
+    // Обновляем все редакторы и поля на странице (и в обсуждении, и в brain storm)
+    const allEditors = document.querySelectorAll(`.action-plan-editor[data-item-id="${itemId}"]`);
+    allEditors.forEach(editor => {
+      const wrapper = editor.closest('.discussion-item-plan') || editor.closest('.action-plan-section');
+      if (wrapper) {
+        const inputs = wrapper.querySelectorAll(`input[data-item-id="${itemId}"]`);
+        const whoInput = inputs[0];
+        const whenInput = inputs[1];
+        updateActionPlanFields(editor, whoInput, whenInput);
+      }
+    });
+
+    console.log('[ActionPlan WS] Update complete for item:', itemId);
   });
 
   // Мемы - добавление нового мема
