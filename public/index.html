@@ -230,6 +230,19 @@
           <div>
             <h5 class="mb-0" id="session-title">Название сессии</h5>
             <small class="text-white-50" id="session-info">Шаблон • Статус</small>
+            <!-- Вкладки переключения между Brain storm и Обсуждение -->
+            <ul class="nav nav-tabs mt-2" id="session-tabs" style="display:none;">
+              <li class="nav-item">
+                <button class="nav-link active py-1 px-2" id="brainstorm-tab-btn" onclick="switchToTab('brainstorm')">
+                  🧠 Brain storm
+                </button>
+              </li>
+              <li class="nav-item">
+                <button class="nav-link py-1 px-2" id="discussion-tab-btn" onclick="switchToTab('discussion')">
+                  💬 Обсуждение <span class="badge bg-primary ms-1" id="discussion-count-badge">0</span>
+                </button>
+              </li>
+            </ul>
           </div>
         </div>
         
@@ -276,6 +289,23 @@
           <div class="text-white-50" id="vote-limit-display" style="display:none;">
             <small>Голосов: <strong id="vote-limit-value">5</strong></small>
           </div>
+          
+          <!-- Чекбоксы для админа -->
+          <div class="text-white d-flex gap-3 align-items-center" id="admin-view-controls" style="display:none; background: rgba(255,255,255,0.15); padding: 6px 12px; border-radius: 8px;">
+            <label class="form-check-label form-check-label-sm" title="Показывать только свои карточки">
+              <input type="checkbox" id="hide-others-cards" class="form-check-input" onchange="toggleHideOthersCards(this.checked)">
+              🚫📋
+            </label>
+            <label class="form-check-label form-check-label-sm" title="Скрывать голоса других участников">
+              <input type="checkbox" id="hide-others-votes" class="form-check-input" onchange="toggleHideOthersVotes(this.checked)">
+              🔇
+            </label>
+            <button class="btn btn-sm btn-light" id="vote-mode-btn" onclick="toggleVoteMode()" title="Режим голосования">
+              <span class="material-icons" style="font-size: 16px; vertical-align: middle;">thumb_up</span>
+              Голосовать
+            </button>
+          </div>
+          
           <span class="text-white" id="user-display"></span>
           <button class="btn btn-outline-light btn-sm" id="admin-panel-btn" onclick="toggleAdminPanel()" style="display:none;">
             <span class="material-icons">admin_panel_settings</span>
@@ -310,7 +340,22 @@
         <div class="col" id="columns-container">
           <!-- Колонки будут добавлены динамически -->
         </div>
-        
+
+        <!-- Вкладка "Обсуждение" -->
+        <div class="col" id="discussion-container" style="display:none;">
+          <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+              <span class="material-icons align-middle">forum</span>
+              Обсуждение
+            </div>
+            <div class="card-body" id="discussion-items-container">
+              <p class="text-muted text-center">Выберите карточки во вкладке "Brain storm" для обсуждения</p>
+            </div>
+            <!-- Ручка для изменения размера -->
+            <div class="discussion-resize-handle" id="discussion-resize-handle" title="Изменить размер"></div>
+          </div>
+        </div>
+
         <!-- Панель администратора -->
         <div class="col-md-3" id="admin-panel" style="display:none;">
           <div class="card shadow-sm">
@@ -329,28 +374,18 @@
                 <option value="freeform">Свободный</option>
               </select>
               
-              <h6 class="card-title">Модерация</h6>
-              <div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" id="allow-memes" checked>
-                <label class="form-check-label">Разрешить мемы</label>
-              </div>
-              <div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" id="allow-emoji" checked>
-                <label class="form-check-label">Разрешить смайлы</label>
-              </div>
-              <div class="form-check form-switch mb-3">
-                <input class="form-check-input" type="checkbox" id="voting-enabled" checked>
-                <label class="form-check-label">Голосование</label>
-              </div>
-              
               <h6 class="card-title">Экспорт</h6>
               <button class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="exportResults('json')">
                 <span class="material-icons align-middle">download</span>
                 JSON
               </button>
-              <button class="btn btn-outline-primary btn-sm w-100" onclick="exportResults('pdf')">
+              <button class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="exportResults('pdf')">
                 <span class="material-icons align-middle">picture_as_pdf</span>
                 PDF
+              </button>
+              <button class="btn btn-outline-primary btn-sm w-100" onclick="exportResults('confluence')">
+                <span class="material-icons align-middle">description</span>
+                Confluence
               </button>
             </div>
           </div>
@@ -394,35 +429,35 @@
             
             <div class="tab-content">
               <div class="tab-pane fade show active" id="tab-text">
-                <textarea class="form-control" id="item-text" rows="4" placeholder="Ваша идея..."></textarea>
-                
+                <div class="form-control" id="item-text" contenteditable="true" placeholder="Ваша идея..." style="min-height: 100px; overflow-y: auto;"></div>
+
                 <!-- Быстрая вставка смайлов -->
                 <label class="form-label mt-2">Вставить смайл:</label>
                 <div class="emoji-picker-inline">
-                  <span class="emoji-btn" onclick="insertEmoji('👍')">👍</span>
-                  <span class="emoji-btn" onclick="insertEmoji('👎')">👎</span>
-                  <span class="emoji-btn" onclick="insertEmoji('✅')">✅</span>
-                  <span class="emoji-btn" onclick="insertEmoji('❌')">❌</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🎉')">🎉</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🔥')">🔥</span>
-                  <span class="emoji-btn" onclick="insertEmoji('💡')">💡</span>
-                  <span class="emoji-btn" onclick="insertEmoji('⭐')">⭐</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🚀')">🚀</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😄')">😄</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😢')">😢</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😡')">😡</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🤔')">🤔</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🎯')">🎯</span>
-                  <span class="emoji-btn" onclick="insertEmoji('💪')">💪</span>
-                  <span class="emoji-btn" onclick="insertEmoji('❤️')">❤️</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😍')">😍</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🤣')">🤣</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😮')">😮</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😱')">😱</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🙄')">🙄</span>
-                  <span class="emoji-btn" onclick="insertEmoji('💩')">💩</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🙏')">🙏</span>
-                  <span class="emoji-btn" onclick="insertEmoji('📈')">📈</span>
+                  <span class="emoji-btn" onclick="insertEmoji('👍', event)">👍</span>
+                  <span class="emoji-btn" onclick="insertEmoji('👎', event)">👎</span>
+                  <span class="emoji-btn" onclick="insertEmoji('✅', event)">✅</span>
+                  <span class="emoji-btn" onclick="insertEmoji('❌', event)">❌</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🎉', event)">🎉</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🔥', event)">🔥</span>
+                  <span class="emoji-btn" onclick="insertEmoji('💡', event)">💡</span>
+                  <span class="emoji-btn" onclick="insertEmoji('⭐', event)">⭐</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🚀', event)">🚀</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😄', event)">😄</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😢', event)">😢</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😡', event)">😡</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🤔', event)">🤔</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🎯', event)">🎯</span>
+                  <span class="emoji-btn" onclick="insertEmoji('💪', event)">💪</span>
+                  <span class="emoji-btn" onclick="insertEmoji('❤️', event)">❤️</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😍', event)">😍</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🤣', event)">🤣</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😮', event)">😮</span>
+                  <span class="emoji-btn" onclick="insertEmoji('😱', event)">😱</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🙄', event)">🙄</span>
+                  <span class="emoji-btn" onclick="insertEmoji('💩', event)">💩</span>
+                  <span class="emoji-btn" onclick="insertEmoji('🙏', event)">🙏</span>
+                  <span class="emoji-btn" onclick="insertEmoji('📈', event)">📈</span>
                 </div>
 
                 <!-- Быстрая вставка мемов -->
@@ -509,34 +544,18 @@
   
   <!-- Модальное окно завершения -->
   <div class="modal fade" id="endSessionModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-sm">
       <div class="modal-content">
         <div class="modal-header">
           <h5 class="modal-title">Завершение ретроспективы</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <div class="mb-3">
-            <label class="form-label">Итоги ретроспективы</label>
-            <textarea class="form-control" id="session-summary" rows="4" placeholder="Основные выводы..."></textarea>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">План действий (Action Items)</label>
-            <div id="action-items-container">
-              <div class="input-group mb-2">
-                <input type="text" class="form-control action-item-input" placeholder="Задача">
-                <button class="btn btn-outline-danger" onclick="removeActionItem(this)">×</button>
-              </div>
-            </div>
-            <button class="btn btn-outline-primary btn-sm" onclick="addActionItem()">
-              <span class="material-icons">add</span>
-              Добавить задачу
-            </button>
-          </div>
+          <p>Точно завершить ретроспективу?</p>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
-          <button type="button" class="btn btn-success" onclick="confirmEndSession()">Завершить</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Нет</button>
+          <button type="button" class="btn btn-success" onclick="confirmEndSession()">Да</button>
         </div>
       </div>
     </div>

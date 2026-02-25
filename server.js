@@ -39,7 +39,16 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+// Отключаем кэширование статических файлов для разработки
+app.use(express.static(path.join(__dirname, 'public'), {
+  etag: false,
+  lastModified: false,
+  setHeaders: (res, path) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+}));
 
 // ==================== API ====================
 
@@ -148,6 +157,27 @@ app.get('/api/sessions/:id/items/:itemId', async (req, res) => {
   }
 });
 
+// Получить голоса голосования сессии
+app.get('/api/sessions/:id/votes', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT item_id, user_id FROM vote_mode_votes WHERE session_id = $1',
+      [req.params.id]
+    );
+    // Группируем по item_id
+    const votesByItem = {};
+    result.rows.forEach(row => {
+      if (!votesByItem[row.item_id]) {
+        votesByItem[row.item_id] = [];
+      }
+      votesByItem[row.item_id].push(row.user_id);
+    });
+    res.json(votesByItem);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Добавить идею
 app.post('/api/sessions/:id/items', async (req, res) => {
   const { text, category, author, type, order, reactions, user_reactions } = req.body;
@@ -173,7 +203,7 @@ app.post('/api/sessions/:id/items', async (req, res) => {
 
 // Обновить идею (голосование, статус, категория для drag-n-drop, порядок)
 app.patch('/api/sessions/:id/items/:itemId', async (req, res) => {
-  const { votes, status, category, text, order, reactions, user_reactions, merged_parts_data, type, meme_url } = req.body;
+  const { votes, status, category, text, order, reactions, user_reactions, merged_parts_data, type, meme_url, author } = req.body;
   const { id: sessionId, itemId } = req.params;
 
   const updates = [];
@@ -219,6 +249,26 @@ app.patch('/api/sessions/:id/items/:itemId', async (req, res) => {
   if (meme_url !== undefined) {
     updates.push(`meme_url = $${paramIndex++}`);
     params.push(meme_url);
+  }
+  if (author !== undefined) {
+    updates.push(`author = $${paramIndex++}`);
+    params.push(author);
+  }
+  if (req.body.for_discussion !== undefined) {
+    updates.push(`for_discussion = $${paramIndex++}`);
+    params.push(req.body.for_discussion);
+  }
+  if (req.body.action_plan_text !== undefined) {
+    updates.push(`action_plan_text = $${paramIndex++}`);
+    params.push(req.body.action_plan_text);
+  }
+  if (req.body.action_plan_who !== undefined) {
+    updates.push(`action_plan_who = $${paramIndex++}`);
+    params.push(req.body.action_plan_who);
+  }
+  if (req.body.action_plan_when !== undefined) {
+    updates.push(`action_plan_when = $${paramIndex++}`);
+    params.push(req.body.action_plan_when);
   }
 
   if (updates.length === 0) {
@@ -346,6 +396,70 @@ app.post('/api/sessions/:id/items/:itemId/react', async (req, res) => {
     io.to(sessionId).emit('reaction:updated', { itemId, reactions, user_reactions: userReactions, userId });
     io.to(sessionId).emit('item:updated', updatedItem);
 
+    res.json(updatedItem);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Переключение статуса обсуждения
+app.patch('/api/sessions/:id/items/:itemId/discussion', async (req, res) => {
+  const { itemId } = req.params;
+  const { id: sessionId } = req.params;
+  const { for_discussion } = req.body;
+
+  try {
+    await pool.query(
+      'UPDATE items SET for_discussion = $1 WHERE id = $2',
+      [for_discussion, itemId]
+    );
+
+    const updatedResult = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
+    const updatedItem = updatedResult.rows[0];
+
+    io.to(sessionId).emit('item:updated', updatedItem);
+    res.json(updatedItem);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Сохранение плана действий
+app.patch('/api/sessions/:id/items/:itemId/action-plan', async (req, res) => {
+  const { itemId } = req.params;
+  const { id: sessionId } = req.params;
+  const { action_plan_text, action_plan_who, action_plan_when } = req.body;
+
+  try {
+    const updates = [];
+    const params = [];
+    let paramIndex = 1;
+
+    if (action_plan_text !== undefined) {
+      updates.push(`action_plan_text = $${paramIndex++}`);
+      params.push(action_plan_text);
+    }
+    if (action_plan_who !== undefined) {
+      updates.push(`action_plan_who = $${paramIndex++}`);
+      params.push(action_plan_who);
+    }
+    if (action_plan_when !== undefined) {
+      updates.push(`action_plan_when = $${paramIndex++}`);
+      params.push(action_plan_when);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    params.push(itemId);
+
+    await pool.query(`UPDATE items SET ${updates.join(', ')} WHERE id = $${paramIndex}`, params);
+
+    const updatedResult = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
+    const updatedItem = updatedResult.rows[0];
+
+    io.to(sessionId).emit('item:updated', updatedItem);
     res.json(updatedItem);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -689,6 +803,79 @@ io.on('connection', (socket) => {
     socket.to(data.session_id).emit('item:created', data);
   });
 
+  // Настройки отображения
+  socket.on('view:settings', (data) => {
+    const { sessionId, hideOthersCards, hideOthersVotes } = data;
+    // Сохраняем в сессии
+    pool.query(
+      `UPDATE sessions SET hide_others_cards = $1, hide_others_votes = $2 WHERE id = $3`,
+      [hideOthersCards, hideOthersVotes, sessionId]
+    ).catch(err => console.error('Error saving view settings:', err));
+    
+    // Отправляем всем в сессии включая отправителя
+    io.in(sessionId).emit('view:settings', { hideOthersCards, hideOthersVotes });
+    console.log(`View settings updated in session ${sessionId}: hideOthersCards=${hideOthersCards}, hideOthersVotes=${hideOthersVotes}`);
+  });
+
+  // Режим голосования
+  socket.on('vote:mode', (data) => {
+    const { sessionId, voteMode, sessionEnded } = data;
+    io.in(sessionId).emit('vote:mode', { voteMode, sessionEnded });
+    console.log(`Vote mode updated in session ${sessionId}: voteMode=${voteMode}, sessionEnded=${sessionEnded}`);
+  });
+
+  // Выбор карточки для обсуждения
+  socket.on('discussion:toggle', (data) => {
+    const { sessionId, itemId, selected } = data;
+    socket.to(sessionId).emit('discussion:toggle', {
+      itemId,
+      userId: socket.handshake.query.userId,
+      selected
+    });
+    console.log(`Discussion toggle in session ${sessionId}: itemId=${itemId}, selected=${selected}`);
+  });
+
+  // Обновление плана действий в реальном времени
+  socket.on('action-plan:update', (data) => {
+    const { sessionId, itemId, action_plan_text, action_plan_who, action_plan_when } = data;
+    // Отправляем всем кроме отправителя
+    socket.to(sessionId).emit('action-plan:update', {
+      itemId,
+      action_plan_text,
+      action_plan_who,
+      action_plan_when,
+      userId: socket.handshake.query.userId
+    });
+  });
+
+  // Голосование в режиме голосования
+  socket.on('vote:submit', async (data) => {
+    const { sessionId, itemId, userId, voted } = data;
+    
+    try {
+      if (voted) {
+        // Сохраняем голос в БД
+        await pool.query(
+          `INSERT INTO vote_mode_votes (session_id, item_id, user_id)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (session_id, item_id, user_id) DO NOTHING`,
+          [sessionId, itemId, userId]
+        );
+      } else {
+        // Удаляем голос из БД
+        await pool.query(
+          'DELETE FROM vote_mode_votes WHERE session_id = $1 AND item_id = $2 AND user_id = $3',
+          [sessionId, itemId, userId]
+        );
+      }
+    } catch (err) {
+      console.error('Error saving vote:', err.message);
+    }
+    
+    io.in(sessionId).emit('vote:updated', { itemId, userId, voted });
+    console.log(`Vote submitted in session ${sessionId}: itemId=${itemId}, userId=${userId}, voted=${voted}`);
+  });
+
   // Мемы - добавление через WebSocket
   socket.on('meme:add', async (data) => {
     const { sessionId, name, url, createdBy } = data;
@@ -746,14 +933,76 @@ io.on('connection', (socket) => {
 async function startServer() {
   await initDatabase();
   await loadMemesFromDb();
-  
+
   // Миграция: добавляем колонку merged_parts_data если её нет
   try {
     await pool.query(`
-      ALTER TABLE items 
+      ALTER TABLE items
       ADD COLUMN IF NOT EXISTS merged_parts_data TEXT
     `);
     console.log('✅ Migration: merged_parts_data column added');
+  } catch (err) {
+    console.error('⚠️ Migration error:', err.message);
+  }
+
+  // Миграция: создаём таблицу для голосов голосования
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vote_mode_votes (
+        id SERIAL PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(session_id, item_id, user_id)
+      )
+    `);
+    console.log('✅ Migration: vote_mode_votes table created');
+  } catch (err) {
+    console.error('⚠️ Migration error:', err.message);
+  }
+
+  // Миграция: добавляем колонку for_discussion если её нет
+  try {
+    await pool.query(`
+      ALTER TABLE items
+      ADD COLUMN IF NOT EXISTS for_discussion BOOLEAN DEFAULT false
+    `);
+    console.log('✅ Migration: for_discussion column added');
+  } catch (err) {
+    console.error('⚠️ Migration error:', err.message);
+  }
+
+  // Миграция: добавляем колонки для плана действий
+  try {
+    await pool.query(`
+      ALTER TABLE items
+      ADD COLUMN IF NOT EXISTS action_plan_text TEXT
+    `);
+    await pool.query(`
+      ALTER TABLE items
+      ADD COLUMN IF NOT EXISTS action_plan_who TEXT
+    `);
+    await pool.query(`
+      ALTER TABLE items
+      ADD COLUMN IF NOT EXISTS action_plan_when TEXT
+    `);
+    console.log('✅ Migration: action_plan columns added');
+  } catch (err) {
+    console.error('⚠️ Migration error:', err.message);
+  }
+
+  // Миграция: добавляем колонки для настроек отображения в sessions
+  try {
+    await pool.query(`
+      ALTER TABLE sessions
+      ADD COLUMN IF NOT EXISTS hide_others_cards BOOLEAN DEFAULT false
+    `);
+    await pool.query(`
+      ALTER TABLE sessions
+      ADD COLUMN IF NOT EXISTS hide_others_votes BOOLEAN DEFAULT false
+    `);
+    console.log('✅ Migration: session view settings columns added');
   } catch (err) {
     console.error('⚠️ Migration error:', err.message);
   }

@@ -11,8 +11,28 @@ let timerRunning = false;
 let joinSent = false; // Флаг для предотвращения дублирования join
 let addedItems = new Set(); // Set для отслеживания добавленных элементов (предотвращение дубликатов)
 
+// Сохранённая позиция курсора для contenteditable
+let savedSelection = null;
+
 // Лимит голосов
 let voteLimit = 5;
+
+// Режимы отображения (только для админа)
+let hideOthersCards = false; // Скрыть карточки других пользователей
+let hideOthersVotes = false; // Скрыть голоса других участников
+let voteMode = false; // Режим голосования
+let votingStarted = false; // Голосование было начато в этой сессии (блокирует объединение/разъединение)
+let sessionEnded = false; // Сессия завершена (после нажатия "Стоп")
+
+// Голоса голосования (отдельно от реакций)
+let voteModeVotes = {}; // { itemId: count } - количество голосов на карточке
+let userVoteModeVotes = []; // [itemId1, itemId2] - куда пользователь отдал голос в режиме голосования
+
+// Вкладки сессии
+let currentTab = 'brainstorm'; // 'brainstorm' или 'discussion'
+
+// Выбранные карточки для обсуждения
+let selectedDiscussionItems = new Set(); // Set itemId
 
 // Настроение пользователя
 let userMood = null;
@@ -252,6 +272,25 @@ function checkActiveSession() {
   if (returnBtn) returnBtn.style.display = 'none';
 }
 
+// Список имён для авто-входа
+const RANDOM_NAMES = [
+  'БагБаг', 'КодДок', 'Тестер', 'Логикс', 'Плюсик', 'БайтТрик', 'Нулик', 'СкриптоНяш', 'Глитчик', 'Пингвин',
+  'ФокусПокус', 'БлокЧек', 'РитмИКод', 'ПлюсМинус', 'ГлитчКот', 'СвичБич', 'ТвикТак', 'КрэшТэш', 'МиксСникс', 'ТокенОкен',
+  'КотоБайт', 'Пингвинчик', 'ЗайкаКод', 'ЛисаЛогик', 'СоваСкрипт', 'ЕнотикТест', 'МышаФокус', 'КроликПик', 'СлоникБаг', 'ТигрёнокПлюс',
+  'ПумаПикс', 'Волчица-Вижн', 'Медвежонок-Блок', 'Панда-Пауза', 'ОбезьянаКлик', 'Пчёлка-Данные', 'Орлик-Идея', 'ЧерепашкаТим', 'АкулаАналитик', 'КотоПсихолог',
+  'БобрКод', 'КотоМыш', 'ПингвТест', 'ЛисаБаг', 'СоваSQL', 'ЕнотДанные', 'КроликПикс', 'МышаСкрипт', 'ТигрЛогик', 'ПумаПлюс',
+  'ВолкФокус', 'Медвежонок-Блок', 'Панда-Чарт', 'ОбезьянаФича', 'ПчёлкаАнал', 'ОрёлИдея', 'ЧерепаФлоу', 'АкулаТест', 'СоваМетрика', 'КотикКэш',
+  'ЗайкаСессия', 'ЛисёнокБайт', 'ПингвинПинг', 'КотДетектив', 'БурёнкаБаг', 'КотоКлик', 'Сова-Ретро', 'Енот-Инсайт', 'Кролик-Клик', 'Мышь-Мета',
+  'Тигр-Тикет', 'Пума-Пайплайн', 'Волчица-Виз', 'Медведь-Модель', 'Панда-Пауза', 'Обезьяна-Оценка', 'ПтичкаПрогноз', 'Слоник-Сессия', 'Кот-Коммит', 'Заяц-Запрос',
+  'ЛисаЛуп', 'Пингвин-Пулл', 'Сова-Сейф', 'Енот-Эффект', 'Кролик-Ковер', 'Мыш-Монитор', 'Тигр-Тренд', 'ПумаПротокол', 'Волк-Валидация', 'Котик-Коннект',
+  'ДизайнерКот', 'ПрограмЕнот', 'ТестерПёс', 'АналитикСова', 'АрхитекторБобр', 'ДевопсПингвин', 'СеошникКот', 'СкрамКотик', 'Дата-Енот', 'Смм-Птичка',
+  'Фулстек-Волк', 'Мобайл-Кот', 'Бекенд-Медведь', 'Фронт-Лиса', 'Системщик-Слон', 'Админ-Хомяк', 'Пентестер-Акула', 'Сто-Череп', 'Дев-Панда', 'КодерКот',
+  'СайтоЕнот', 'Тест-Тигр', 'Скрипт-Сова', 'Сео-Собака', 'Ба-Барсук', 'Пм-Пума', 'Дизайн-Ёж', 'Смм-Сова', 'Фулл-Лев', 'Моб-Мышь',
+  'Бэк-Бык', 'Фронт-Феникс', 'Сист-Слон', 'Админ-Аист', 'Секур-Сурок', 'Сто-Сова', 'Арх-Акула', 'Дата-Дельфин', 'DevOps-Ёжик', 'Тимлид-Тигр',
+  'Сеньор-Слон', 'Джун-Зайка', 'Мидл-Мышь', 'Секьюр-Сова', 'Контр-Кот', 'Рецен-Рыба', 'Док-Дельфин', 'ТехПис-Пингвин', 'QA-Котик', 'BA-Бобр',
+  'PM-Панда', 'UX-Енот', 'UI-Лиса', 'Сисадмин-Сова', 'Прогр-Пёс', 'Тестер-Тюлень', 'Арх-Аист'
+];
+
 // Проверка URL на наличие ID сессии
 function checkUrlForSession() {
   const urlParams = new URLSearchParams(window.location.search);
@@ -267,6 +306,10 @@ function checkUrlForSession() {
       <small class="text-success">✓ Сессия найдена в ссылке</small>
     `;
 
+    // Генерируем случайное имя
+    const randomName = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
+    document.getElementById('join-name').value = randomName;
+
     // Скрываем вкладку "Создать" при входе по ссылке
     const createTab = document.querySelector('[data-bs-target="#create-tab"]');
     if (createTab) {
@@ -280,10 +323,10 @@ function checkUrlForSession() {
       tab.show();
     }
 
-    // Фокус на поле имени
+    // Автоматический вход через 1 секунду
     setTimeout(() => {
-      document.getElementById('join-name').focus();
-    }, 500);
+      joinSession();
+    }, 1000);
   }
 }
 
@@ -305,12 +348,29 @@ function initSocket() {
   });
   
   socket.on('item:created', (item) => {
+    // Проверяем что сессия загружена
+    if (!currentSession) {
+      console.log('[WS] item:created ignored - currentSession is null');
+      return;
+    }
+    
     // Игнорируем если элемент уже был добавлен локально (предотвращение дубликатов)
     if (addedItems.has(item.id)) {
       console.log('[WS] item:created ignored (already added locally):', item.id);
+      // Всё равно добавляем в currentSession.items
+      if (currentSession?.items) {
+        currentSession.items.push(item);
+      }
+      // Применяем настройки отображения
+      applyViewSettings();
       return;
     }
     if (item.session_id === currentSession?.id) {
+      // Добавляем в currentSession.items
+      if (currentSession?.items) {
+        currentSession.items.push(item);
+      }
+
       // Синхронизируем реакцию текущего пользователя
       let itemUserReactions = item.user_reactions;
       if (typeof itemUserReactions === 'string') {
@@ -320,7 +380,7 @@ function initSocket() {
           itemUserReactions = {};
         }
       }
-      if (itemUserReactions[currentUserId]) {
+      if (currentUserId && itemUserReactions && itemUserReactions[currentUserId]) {
         userReactions[item.id] = itemUserReactions[currentUserId];
       } else {
         delete userReactions[item.id];
@@ -330,10 +390,17 @@ function initSocket() {
       showToast('Новый элемент добавлен!', 'info');
     }
   });
-  
+
   socket.on('item:updated', (item) => {
-    console.log('[WS] item:updated received:', { id: item.id, category: item.category, session_id: item.session_id });
     if (currentSession && item.session_id === currentSession.id) {
+      // Обновляем в currentSession.items
+      if (currentSession?.items) {
+        const index = currentSession.items.findIndex(i => i.id === item.id);
+        if (index >= 0) {
+          currentSession.items[index] = item;
+        }
+      }
+
       // Синхронизируем реакцию текущего пользователя
       let itemUserReactions = item.user_reactions;
       if (typeof itemUserReactions === 'string') {
@@ -343,22 +410,45 @@ function initSocket() {
           itemUserReactions = {};
         }
       }
-      if (itemUserReactions[currentUserId]) {
+      if (currentUserId && itemUserReactions && typeof itemUserReactions === 'object' && itemUserReactions[currentUserId]) {
         userReactions[item.id] = itemUserReactions[currentUserId];
       } else {
         delete userReactions[item.id];
       }
 
-      console.log('[UI] Calling updateItemInColumn for item', item.id, 'in column', item.category);
       updateItemInColumn(item);
-    } else {
-      console.warn('[WS] item:updated skipped - session mismatch', { currentSession: currentSession?.id, itemSession: item.session_id });
+      
+      // Обновляем поля плана действий в обсуждении если они есть
+      if (currentTab === 'discussion') {
+        const editor = document.querySelector(`.action-plan-editor[data-item-id="${item.id}"]`);
+        const whoInput = document.querySelector(`input[data-item-id="${item.id}"][onchange*="who"]`);
+        const whenInput = document.querySelector(`input[data-item-id="${item.id}"][onchange*="when"]`);
+        
+        // Обновляем только если элемент не в фокусе (чтобы не мешать редактированию)
+        if (editor && document.activeElement !== editor && item.action_plan_text !== undefined) {
+          editor.innerHTML = item.action_plan_text || '';
+        }
+        if (whoInput && document.activeElement !== whoInput && item.action_plan_who !== undefined) {
+          whoInput.value = item.action_plan_who || '';
+        }
+        if (whenInput && document.activeElement !== whenInput && item.action_plan_when !== undefined) {
+          whenInput.value = item.action_plan_when || '';
+        }
+      }
     }
   });
 
   // Обработка обновления реакций от других пользователей
   socket.on('reaction:updated', (data) => {
     if (currentSession && data.itemId) {
+      // Обновляем в currentSession.items
+      if (currentSession?.items) {
+        const item = currentSession.items.find(i => i.id === data.itemId);
+        if (item) {
+          item.user_reactions = data.user_reactions;
+        }
+      }
+      
       // Парсим user_reactions если это строка
       let itemUserReactions = data.user_reactions;
       if (typeof itemUserReactions === 'string') {
@@ -368,21 +458,25 @@ function initSocket() {
           itemUserReactions = {};
         }
       }
-      
+
       // Обновляем глобальную переменную userReactions для текущего пользователя
       if (itemUserReactions[currentUserId]) {
         userReactions[data.itemId] = itemUserReactions[currentUserId];
       } else {
         delete userReactions[data.itemId];
       }
-      
+
       updateItemReactions(data.itemId, data.reactions, itemUserReactions);
     }
   });
-  
+
   socket.on('item:deleted', (data) => {
     console.log('[WS] item:deleted received:', { id: data.id });
     if (currentSession) {
+      // Удаляем из currentSession.items
+      if (currentSession?.items) {
+        currentSession.items = currentSession.items.filter(i => i.id !== data.id);
+      }
       console.log('[UI] Calling removeItemFromColumn for item', data.id);
       removeItemFromColumn(data.id);
     }
@@ -392,6 +486,129 @@ function initSocket() {
     showToast('Сессия завершена!', 'success');
     localStorage.removeItem('retroSession');
     setTimeout(() => goHome(), 2000);
+  });
+
+  // Настройки отображения от админа
+  socket.on('view:settings', (data) => {
+    console.log('[WS] Received view:settings', data);
+    hideOthersCards = data.hideOthersCards;
+    hideOthersVotes = data.hideOthersVotes;
+    // Сохраняем в localStorage
+    if (currentSession) {
+      localStorage.setItem(`hideOthersCards_${currentSession.id}`, hideOthersCards);
+      localStorage.setItem(`hideOthersVotes_${currentSession.id}`, hideOthersVotes);
+    }
+    applyViewSettings();
+    applyVoteMode(); // Обновляем отображение голосов голосования
+  });
+
+  // Режим голосования от админа
+  socket.on('vote:mode', (data) => {
+    voteMode = data.voteMode;
+    // Если голосование включено - устанавливаем флаг блокировки
+    if (voteMode) {
+      votingStarted = true;
+    }
+    // Если сессия завершена (нажали "Стоп") - показываем чекбоксы
+    if (data.sessionEnded) {
+      sessionEnded = true;
+      document.getElementById('session-tabs').style.display = 'flex';
+      // Перерисовываем карточки с чекбоксами - обновляем каждую карточку
+      document.querySelectorAll('.retro-item').forEach(itemEl => {
+        const itemId = itemEl.dataset.id;
+        const item = currentSession?.items?.find(i => i.id === itemId);
+        if (item) {
+          const newHtml = createItemHtml(item);
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = newHtml;
+          const newItemEl = tempDiv.firstElementChild;
+          if (newItemEl) {
+            itemEl.replaceWith(newItemEl);
+            initDraggable(newItemEl);
+          }
+        }
+      });
+    }
+    applyVoteMode();
+    showToast(voteMode ? 'Режим голосования включён' : 'Режим голосования выключен', 'info');
+  });
+
+  // Обновление голоса голосования (от других пользователей)
+  socket.on('vote:updated', (data) => {
+    const { itemId, userId, voted } = data;
+
+    // Не обновляем если это наш голос (чтобы избежать дублирования)
+    if (userId === currentUserId) return;
+
+    if (voted) {
+      voteModeVotes[itemId] = (voteModeVotes[itemId] || 0) + 1;
+    } else {
+      voteModeVotes[itemId] = Math.max(0, (voteModeVotes[itemId] || 0) - 1);
+      if (voteModeVotes[itemId] === 0) delete voteModeVotes[itemId];
+    }
+
+    applyVoteMode();
+  });
+
+  // Обсуждение - выбор карточки другим участником
+  socket.on('discussion:toggle', (data) => {
+    const { itemId, userId, selected } = data;
+    
+    // Не обновляем если это наш выбор
+    if (userId === currentUserId) return;
+    
+    if (selected) {
+      selectedDiscussionItems.add(itemId);
+    } else {
+      selectedDiscussionItems.delete(itemId);
+    }
+    
+    updateDiscussionCount();
+    
+    // Если мы во вкладке обсуждения - перерисовываем
+    if (currentTab === 'discussion') {
+      renderDiscussionTab();
+    }
+    
+    // Обновляем чекбокс в Brain storm
+    const checkbox = document.querySelector(`.discussion-checkbox input[data-item-id="${itemId}"]`);
+    if (checkbox) {
+      checkbox.checked = selected;
+    }
+  });
+
+  // Обновление плана действий в реальном времени
+  socket.on('action-plan:update', (data) => {
+    const { itemId, action_plan_text, action_plan_who, action_plan_when } = data;
+    
+    // Не обновляем если это наши изменения
+    if (currentUserId && data.userId === currentUserId) return;
+    
+    // Обновляем в currentSession
+    const item = currentSession?.items?.find(i => i.id === itemId);
+    if (item) {
+      if (action_plan_text !== undefined) item.action_plan_text = action_plan_text;
+      if (action_plan_who !== undefined) item.action_plan_who = action_plan_who;
+      if (action_plan_when !== undefined) item.action_plan_when = action_plan_when;
+    }
+    
+    // Обновляем UI только если мы во вкладке обсуждения
+    if (currentTab === 'discussion') {
+      const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
+      const whoInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="who"]`);
+      const whenInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="when"]`);
+      
+      // Обновляем только если элемент не в фокусе
+      if (editor && document.activeElement !== editor && action_plan_text !== undefined) {
+        editor.innerHTML = action_plan_text || '';
+      }
+      if (whoInput && document.activeElement !== whoInput && action_plan_who !== undefined) {
+        whoInput.value = action_plan_who || '';
+      }
+      if (whenInput && document.activeElement !== whenInput && action_plan_when !== undefined) {
+        whenInput.value = action_plan_when || '';
+      }
+    }
   });
 
   // Мемы - добавление нового мема
@@ -561,6 +778,43 @@ function setupEventListeners() {
     submitItem();
   });
 
+  // Обработчик для contenteditable div - отправка по Ctrl+Enter
+  const itemTextDiv = document.getElementById('item-text');
+  if (itemTextDiv) {
+    // Сохраняем позицию курсора при потере фокуса
+    itemTextDiv.addEventListener('blur', () => {
+      const selection = window.getSelection();
+      if (selection.rangeCount > 0) {
+        savedSelection = selection.getRangeAt(0).cloneRange();
+      }
+    });
+
+    // Восстанавливаем позицию курсора при фокусе
+    itemTextDiv.addEventListener('focus', () => {
+      if (savedSelection) {
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(savedSelection);
+      }
+    });
+
+    itemTextDiv.addEventListener('keydown', (e) => {
+      // Отправка только по Ctrl+Enter или Cmd+Enter
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        submitItem();
+      }
+      // Enter без модификаторов - перевод строки (разрешаем default поведение)
+    });
+
+    // Очистка форматирования при вставке
+    itemTextDiv.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const text = e.clipboardData.getData('text/plain');
+      document.execCommand('insertText', false, text);
+    });
+  }
+
   // Переключатели админ панели
   document.getElementById('allow-memes')?.addEventListener('change', (e) => {
     showToast(`Мемы ${e.target.checked ? 'разрешены' : 'запрещены'}`, 'info');
@@ -679,7 +933,10 @@ async function restoreSession() {
       currentSession = data.session;
       currentUserId = data.userId;
       isAdmin = data.isAdmin;
-      console.log('[WS] Restored session from localStorage:', { sessionId: currentSession.id, userId: currentUserId, isAdmin, socketConnected: socket?.connected });
+      // Восстанавливаем флаги голосования и завершения сессии
+      sessionEnded = data.sessionEnded || false;
+      votingStarted = data.votingStarted || false;
+      console.log('[WS] Restored session from localStorage:', { sessionId: currentSession.id, userId: currentUserId, isAdmin, sessionEnded, socketConnected: socket?.connected });
 
       showSessionPage();
 
@@ -726,7 +983,9 @@ function saveSession() {
     localStorage.setItem('retroSession', JSON.stringify({
       session: currentSession,
       userId: currentUserId,
-      isAdmin
+      isAdmin,
+      sessionEnded,
+      votingStarted
     }));
     // Также сохраняем в URL
     const url = new URL(window.location);
@@ -883,6 +1142,26 @@ async function loadSessionData() {
   document.getElementById('session-info').textContent = `${templateName} • ${currentSession.status}`;
   document.getElementById('session-id-display').textContent = currentSession.id;
   document.getElementById('user-display').textContent = currentUserId.replace(/^(admin_|user_)/, '');
+
+  // Загружаем настройки отображения из сессии
+  try {
+    const response = await fetch(`/api/sessions/${currentSession.id}`);
+    const sessionData = await response.json();
+    hideOthersCards = sessionData.hide_others_cards || false;
+    hideOthersVotes = sessionData.hide_others_votes || false;
+    
+    // Обновляем чекбоксы
+    const hideCardsCheckbox = document.getElementById('hide-others-cards');
+    const hideVotesCheckbox = document.getElementById('hide-others-votes');
+    if (hideCardsCheckbox) hideCardsCheckbox.checked = hideOthersCards;
+    if (hideVotesCheckbox) hideVotesCheckbox.checked = hideOthersVotes;
+    
+    // Сохраняем в localStorage
+    localStorage.setItem(`hideOthersCards_${currentSession.id}`, hideOthersCards);
+    localStorage.setItem(`hideOthersVotes_${currentSession.id}`, hideOthersVotes);
+  } catch (error) {
+    console.error('Error loading session settings:', error);
+  }
   
   // Показываем кнопки только админу
   const isAdm = isAdmin;
@@ -896,10 +1175,62 @@ async function loadSessionData() {
   document.getElementById('vote-limit-value').textContent = voteLimit;
 
   renderColumns();
-  
+
   try {
     const response = await fetch(`/api/sessions/${currentSession.id}/items`);
     const items = await response.json();
+
+    // Сохраняем items в currentSession для редактирования
+    currentSession.items = items;
+    
+    // Логируем action_plan_text для отладки
+    console.log('[LoadSession] Items loaded:', items.map(i => ({ 
+      id: i.id, 
+      action_plan_text: i.action_plan_text ? '✅' : '❌',
+      action_plan_who: i.action_plan_who || '-',
+      action_plan_when: i.action_plan_when || '-'
+    })));
+
+    // Загружаем выбранные карточки для обсуждения из БД
+    selectedDiscussionItems.clear();
+    items.forEach(item => {
+      if (item.for_discussion) {
+        selectedDiscussionItems.add(item.id);
+      }
+    });
+    updateDiscussionCount();
+
+    // Восстанавливаем сохраненную вкладку ДО рендера колонок
+    const savedTab = localStorage.getItem(`retroSessionTab_${currentSession.id}`);
+    if (sessionEnded) {
+      // Показываем вкладки если сессия завершена
+      document.getElementById('session-tabs').style.display = 'flex';
+
+      // Определяем какую вкладку показать — устанавливаем currentTab ДО рендера
+      currentTab = savedTab || 'brainstorm';
+
+      if (currentTab === 'discussion') {
+        // Переключаем на вкладку обсуждения
+        document.getElementById('columns-container').style.display = 'none';
+        document.getElementById('columns-container').classList.add('d-none');
+        document.getElementById('discussion-container').style.display = '';
+        document.getElementById('discussion-container').classList.remove('d-none');
+        document.getElementById('brainstorm-tab-btn').classList.remove('active');
+        document.getElementById('discussion-tab-btn').classList.add('active');
+        // renderDiscussionTab вызывается позже, после загрузки items
+      } else {
+        // Вкладка brain storm - показываем колонки
+        document.getElementById('columns-container').style.display = '';
+        document.getElementById('columns-container').classList.remove('d-none');
+        document.getElementById('discussion-container').style.display = 'none';
+        document.getElementById('discussion-container').classList.add('d-none');
+        document.getElementById('brainstorm-tab-btn').classList.add('active');
+        document.getElementById('discussion-tab-btn').classList.remove('active');
+      }
+    } else {
+      // Если сессия не завершена, по умолчанию brain storm
+      currentTab = 'brainstorm';
+    }
 
     document.querySelectorAll('.column-items').forEach(col => col.innerHTML = '');
     // Сортируем элементы по порядку внутри каждой категории
@@ -908,6 +1239,15 @@ async function loadSessionData() {
       return (a.order || 0) - (b.order || 0);
     });
     items.forEach(item => addItemToColumn(item));
+
+    // Применяем настройки отображения после загрузки всех карточек
+    applyViewSettings();
+    
+    // Если выбрана вкладка обсуждения - рендерим её после загрузки items
+    if (sessionEnded && currentTab === 'discussion') {
+      renderDiscussionTab();
+      // startActionPlanAutoSave вызывается внутри renderDiscussionTab
+    }
   } catch (error) {
     console.error('Error loading items:', error);
   }
@@ -926,7 +1266,8 @@ async function loadSessionData() {
           itemUserReactions = {};
         }
       }
-      if (itemUserReactions[currentUserId]) {
+      // Проверяем что currentUserId и itemUserReactions существуют
+      if (currentUserId && itemUserReactions && typeof itemUserReactions === 'object' && itemUserReactions[currentUserId]) {
         userReactions[item.id] = itemUserReactions[currentUserId];
       }
     });
@@ -981,7 +1322,66 @@ async function loadSessionData() {
     });
   }
 
+  // Показываем панель управления только админу
+  const adminViewControls = document.getElementById('admin-view-controls');
+  const adminPanelBtn = document.getElementById('admin-panel-btn');
+  const endSessionBtn = document.getElementById('end-session-btn');
+  const adminVotesControl = document.getElementById('admin-votes-control');
+  const voteLimitDisplay = document.getElementById('vote-limit-display');
+  const userDisplay = document.getElementById('user-display');
+
+  if (isAdmin) {
+    if (adminViewControls) adminViewControls.style.setProperty('display', 'flex', 'important');
+    if (adminPanelBtn) adminPanelBtn.style.display = 'block';
+    if (endSessionBtn) endSessionBtn.style.display = 'block';
+    if (adminVotesControl) adminVotesControl.style.display = 'block';
+    if (voteLimitDisplay) voteLimitDisplay.style.display = 'none';
+    // Скрываем имя у админа
+    if (userDisplay) userDisplay.style.display = 'none';
+  } else {
+    if (adminViewControls) adminViewControls.style.display = 'none';
+    if (adminPanelBtn) adminPanelBtn.style.display = 'none';
+    if (endSessionBtn) endSessionBtn.style.display = 'none';
+    if (adminVotesControl) adminVotesControl.style.display = 'none';
+    if (voteLimitDisplay) voteLimitDisplay.style.display = 'block';
+    // Показываем имя у обычного пользователя
+    if (userDisplay) userDisplay.style.display = 'inline';
+  }
+
   socket.emit('participant:list', currentSession.id);
+  
+  // Загружаем голоса голосования из базы данных (асинхронно, не блокируя UI)
+  setTimeout(() => loadVoteModeVotes(), 100);
+}
+
+// Загрузка голосов голосования из БД
+async function loadVoteModeVotes() {
+  if (!currentSession) return;
+
+  try {
+    const response = await fetch(`/api/sessions/${currentSession.id}/votes`);
+    const votesByItem = await response.json();
+
+    // Преобразуем в формат voteModeVotes { itemId: count }
+    voteModeVotes = {};
+    for (const [itemId, userIds] of Object.entries(votesByItem)) {
+      voteModeVotes[itemId] = userIds.length;
+    }
+
+    // Если текущий пользователь уже голосовал, добавляем в userVoteModeVotes
+    userVoteModeVotes = [];
+    for (const [itemId, userIds] of Object.entries(votesByItem)) {
+      if (userIds.includes(currentUserId)) {
+        userVoteModeVotes.push(itemId);
+      }
+    }
+
+    // Обновляем UI - показываем голоса всегда (не только в режиме голосования)
+    applyVoteMode();
+    console.log('[VoteMode] Loaded votes:', { voteModeVotes, userVoteModeVotes });
+  } catch (error) {
+    console.error('Error loading vote mode votes:', error);
+  }
 }
 
 // Рендер колонок
@@ -1118,31 +1518,98 @@ async function saveColumnTitle() {
 }
 
 // Вставка смайла в текст
-function insertEmoji(emoji) {
+function insertEmoji(emoji, event) {
+  // Предотвращаем потерю фокуса
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  
   const textarea = document.getElementById('item-text');
-  const start = textarea.selectionStart;
-  const end = textarea.selectionEnd;
-  const text = textarea.value;
-  const before = text.substring(0, start);
-  const after = text.substring(end);
-  textarea.value = before + emoji + after;
-  textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
+  if (!textarea) return;
+
+  // Используем сохранённую позицию курсора или текущую
+  const selection = window.getSelection();
+  let range;
+  
+  if (savedSelection) {
+    // Используем сохранённую позицию
+    selection.removeAllRanges();
+    selection.addRange(savedSelection);
+    range = savedSelection;
+  } else if (selection.rangeCount > 0) {
+    range = selection.getRangeAt(0);
+    // Проверяем, находится ли range внутри нашего textarea
+    if (!textarea.contains(range.commonAncestorContainer)) {
+      range = document.createRange();
+      range.selectNodeContents(textarea);
+      range.collapse(false);
+    }
+  } else {
+    range = document.createRange();
+    range.selectNodeContents(textarea);
+    range.collapse(false);
+  }
+
+  range.deleteContents();
+
+  // Вставляем текст смайла
+  const textNode = document.createTextNode(emoji);
+  range.insertNode(textNode);
+
+  // Перемещаем курсор после смайла
+  range.setStartAfter(textNode);
+  range.setEndAfter(textNode);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  
+  // Сохраняем новую позицию
+  savedSelection = range.cloneRange();
+  
+  // Возвращаем фокус
   textarea.focus();
 }
 
 // Вставка мема в текст
 function insertMeme(url, name) {
   const textarea = document.getElementById('item-text');
-  const memeText = `![${name}](${url})`;
-  const start = textarea.selectionStart;
-  const end = textarea.selectionEnd;
-  const text = textarea.value;
-  const before = text.substring(0, start);
-  const after = text.substring(end);
-  textarea.value = before + memeText + after;
-  textarea.selectionStart = textarea.selectionEnd = start + memeText.length;
+  if (!textarea) return;
+
+  // Вставляем HTML изображение вместо markdown-ссылки
+  const imgHtml = `<img src="${url}" alt="${name}" style="max-width: 200px; max-height: 150px; border-radius: 6px; margin: 4px; vertical-align: middle;">`;
+
+  // Фокусируемся на textarea
   textarea.focus();
-  
+
+  // Для contenteditable используем document.execCommand или вставку через range
+  const selection = window.getSelection();
+
+  // Если нет выделения, создаем range в конце содержимого
+  let range;
+  if (selection.rangeCount > 0) {
+    range = selection.getRangeAt(0);
+  } else {
+    range = document.createRange();
+    range.selectNodeContents(textarea);
+    range.collapse(false);
+  }
+
+  range.deleteContents();
+
+  // Создаем временный контейнер для HTML
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = imgHtml;
+
+  // Вставляем изображение
+  while (tempDiv.firstChild) {
+    range.insertNode(tempDiv.firstChild);
+  }
+
+  // Перемещаем курсор после изображения
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+
   document.querySelectorAll('.meme-preview').forEach(img => {
     img.classList.toggle('selected', img.src === url);
   });
@@ -1406,59 +1873,160 @@ function selectEmoji(emoji) {
 // Отправка элемента
 async function submitItem() {
   const category = document.getElementById('item-category').value;
-  const text = document.getElementById('item-text').value.trim();
-  const memeUrl = document.getElementById('item-meme-url').value.trim();
-  const emoji = document.getElementById('item-emoji').value;
+  const itemTextDiv = document.getElementById('item-text');
+  const memeUrlInput = document.getElementById('item-meme-url');
+  const emojiInput = document.getElementById('item-emoji');
+
+  const memeUrl = memeUrlInput.value.trim();
+  const emoji = emojiInput.value;
+
+  // Получаем HTML и текст из contenteditable div
+  const htmlContent = itemTextDiv.innerHTML.trim();
+  const textContent = itemTextDiv.innerText.trim();
+
+  // Извлекаем все URL изображений из HTML
+  const imgRegex = /<img[^>]+src="([^"]+)"/g;
+  const imgMatches = [...htmlContent.matchAll(imgRegex)];
+  const imageUrls = imgMatches.map(match => match[1]);
+  const imageAlts = imgMatches.map(match => {
+    const altMatch = match[0].match(/alt="([^"]*)"/);
+    return altMatch ? altMatch[1] : 'Мем';
+  });
 
   let type = 'text';
-  let content = text;
+  let content = '';
+  let memeUrlToSend = null;
 
-  if (memeUrl) {
+  // Если есть изображения в contenteditable
+  if (imageUrls.length > 0) {
+    type = 'meme';
+    memeUrlToSend = imageUrls[0];
+    
+    // Сохраняем текст + markdown изображения
+    // Сначала заменяем <br> на \n
+    let markdownContent = htmlContent.replace(/<br\s*\/?>/gi, '\n');
+    
+    // Заменяем все img на markdown с правильным форматом
+    markdownContent = markdownContent
+      .replace(/<img[^>]+src="([^"]+)"[^>]*alt="([^"]*)"[^>]*>/g, '![$2]($1)')
+      .replace(/<img[^>]+src="([^"]+)"[^>]*>/g, '![Мем]($1)');
+    
+    // Удаляем остальные HTML теги, сохраняя markdown
+    content = markdownContent
+      .replace(/<[^>]+>/g, '') // Удаляем все HTML теги
+      .replace(/&nbsp;/g, ' ')
+      .replace(/\n\s*\n/g, '\n') // Удаляем пустые строки
+      .trim();
+  } else if (memeUrl) {
+    // Если выбран мем во вкладке "Мем"
     type = 'meme';
     content = memeUrl;
-  } else if (emoji && !text) {
+    memeUrlToSend = memeUrl;
+  } else if (emoji && !textContent) {
+    // Только смайл
     type = 'emoji';
     content = emoji;
-  } else if (!text) {
+  } else if (textContent) {
+    // Только текст
+    type = 'text';
+    content = textContent;
+  } else {
     showToast('Введите текст идеи или выберите смайл/мем', 'warning');
     return;
   }
 
-  // Вычисляем порядок - количество элементов в категории + 1
-  const column = document.getElementById(`column-${category}`);
-  const existingItems = column ? column.querySelectorAll('.retro-item').length : 0;
-  const order = existingItems;
+  // Проверяем, редактируем ли мы существующий элемент
+  const editItemId = itemTextDiv.dataset.editItemId;
 
   try {
-    const response = await fetch(`/api/sessions/${currentSession.id}/items`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: content,
-        category,
-        author: currentUserId.replace(/^(admin_|user_)/, ''),
-        type,
-        meme_url: type === 'meme' ? memeUrl : null,
-        emoji: type === 'emoji' ? emoji : null,
-        order
-      })
-    });
+    let response;
+    let item;
 
-    const item = await response.json();
+    if (editItemId) {
+      // Режим редактирования - обновляем существующий элемент
+      response = await fetch(`/api/sessions/${currentSession.id}/items/${editItemId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: content,
+          category,
+          type,
+          meme_url: type === 'meme' ? memeUrlToSend : null,
+          emoji: type === 'emoji' ? emoji : null
+        })
+      });
 
-    // Добавляем элемент в UI сразу, не дожидаясь WebSocket события
-    addItemToColumn(item);
-    // Помечаем элемент как добавленный (для предотвращения дубликатов)
-    addedItems.add(item.id);
+      if (!response.ok) {
+        throw new Error('Failed to update item');
+      }
+
+      item = await response.json();
+
+      // Обновляем UI
+      updateItemInColumn(item);
+
+      // Обновляем в currentSession.items
+      if (currentSession?.items) {
+        const index = currentSession.items.findIndex(i => i.id === editItemId);
+        if (index >= 0) {
+          currentSession.items[index] = item;
+        }
+      }
+
+      // Очищаем атрибут редактирования
+      delete itemTextDiv.dataset.editItemId;
+
+      showToast('Элемент обновлен!', 'success');
+    } else {
+      // Режим создания - создаем новый элемент
+      // Вычисляем порядок - количество элементов в категории + 1
+      const column = document.getElementById(`column-${category}`);
+      const existingItems = column ? column.querySelectorAll('.retro-item').length : 0;
+      const order = existingItems;
+
+      response = await fetch(`/api/sessions/${currentSession.id}/items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: content,
+          category,
+          author: currentUserId.replace(/^(admin_|user_)/, ''),
+          type,
+          meme_url: type === 'meme' ? memeUrlToSend : null,
+          emoji: type === 'emoji' ? emoji : null,
+          order
+        })
+      });
+
+      item = await response.json();
+
+      // Добавляем элемент в UI сразу, не дожидаясь WebSocket события
+      addItemToColumn(item);
+      // Помечаем элемент как добавленный (для предотвращения дубликатов)
+      addedItems.add(item.id);
+      
+      // Добавляем в currentSession.items
+      if (currentSession?.items) {
+        currentSession.items.push(item);
+      }
+
+      showToast('Элемент добавлен!', 'success');
+    }
+
+    // Очищаем форму
+    itemTextDiv.innerHTML = '';
+    itemTextDiv.innerText = '';
+    memeUrlInput.value = '';
+    emojiInput.value = '';
+    document.getElementById('emoji-preview').style.display = 'none';
+    document.querySelectorAll('.emoji-btn').forEach(btn => btn.classList.remove('selected'));
 
     const modal = bootstrap.Modal.getInstance(document.getElementById('addItemModal'));
     if (modal) modal.hide();
 
-    showToast('Элемент добавлен!', 'success');
-
   } catch (error) {
     console.error('Error:', error);
-    showToast('Ошибка добавления элемента', 'danger');
+    showToast('Ошибка: ' + error.message, 'danger');
   }
 }
 
@@ -1470,14 +2038,14 @@ function addItemToColumn(item) {
     return;
   }
 
-  // Проверяем, нет ли уже такого элемента в DOM (предотвращение дубликатов)
-  const existingElement = document.getElementById(`item-${item.id}`);
+  // Проверяем, нет ли уже такого элемента в колонках (не в обсуждении)
+  const existingElement = column.querySelector(`#item-${item.id}`);
   if (existingElement) {
-    console.log('[UI] Item already exists in DOM, skipping:', item.id);
+    console.log('[UI] Item already exists in column, skipping:', item.id);
     return;
   }
 
-  console.log('[UI] Adding item to column:', { id: item.id, category: item.category, text: item.text?.substring(0, 50) });
+  console.log('[UI] Adding item to column:', { id: item.id, category: item.category, text: item.text?.substring(0, 50), author: item.author });
 
   updateColumnCount(item.category);
 
@@ -1488,8 +2056,214 @@ function addItemToColumn(item) {
   if (newElement) {
     initDraggable(newElement);
     console.log('[UI] Item added and draggable initialized:', item.id);
+    // Применяем настройки отображения (скрытие карточек)
+    applyViewSettings();
+    // Применяем режим голосования (показываем кнопки голосования если есть голоса)
+    applyVoteMode();
   } else {
     console.error('[UI] Failed to find added element:', item.id);
+  }
+}
+
+// Получение названия категории
+function getCategoryName(category) {
+  const categories = {
+    'start': '🚀 Начать делать',
+    'stop': '🛑 Перестать делать',
+    'continue': '✅ Продолжать делать',
+    'mad': '😡 Mad',
+    'sad': '😢 Sad',
+    'glad': '😄 Glad',
+    'good': '👍 Good',
+    'bad': '👎 Bad',
+    'ideas': '💡 Ideas',
+    'keep': '✅ Keep',
+    'improve': '🔧 Improve',
+    'start': '🚀 Start',
+    'sailboat': '⛵ Sailboat',
+    'wind': '💨 Wind',
+    'anchor': '⚓ Anchor',
+    'rocks': '🪨 Rocks',
+    'island': '🏝️ Island',
+    'general': '📋 General'
+  };
+  return categories[category] || category || '📋';
+}
+
+// Форматирование текста плана действий
+function formatActionPlan(itemId, command, value = null) {
+  document.execCommand(command, false, value);
+  const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
+  if (editor) {
+    editor.focus();
+    saveActionPlan(itemId, 'text');
+  }
+}
+
+// Сброс форматирования плана действий
+function resetActionPlanFormat(itemId) {
+  const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
+  if (editor) {
+    // Сбрасываем всё форматирование
+    document.execCommand('removeFormat', false, null);
+    document.execCommand('fontName', false, 'Arial');
+    document.execCommand('fontSize', false, '3');
+    document.execCommand('foreColor', false, '#000000');
+    editor.focus();
+    saveActionPlan(itemId, 'text');
+  }
+}
+
+// Выбор карточки для редактирования плана действий
+let selectedActionPlanItemId = null;
+
+function selectActionPlanItem(itemId) {
+  selectedActionPlanItemId = itemId;
+  
+  // Подсвечиваем выбранную карточку
+  document.querySelectorAll('.discussion-item').forEach(el => {
+    el.classList.remove('selected');
+  });
+  const selectedEl = document.querySelector(`.discussion-item[data-id="${itemId}"]`);
+  if (selectedEl) {
+    selectedEl.classList.add('selected');
+  }
+}
+
+// Сохранение плана действий
+let saveActionPlanTimeout = null;
+async function saveActionPlan(itemId, field = 'text', value = null, realtime = false) {
+  if (saveActionPlanTimeout && !realtime) {
+    clearTimeout(saveActionPlanTimeout);
+  }
+
+  const doSave = async () => {
+    try {
+      const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
+      const whoInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="who"]`);
+      const whenInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="when"]`);
+
+      const data = {
+        // Сохраняем HTML с форматированием
+        action_plan_text: field === 'text' ? editor?.innerHTML : null,
+        action_plan_who: field === 'who' ? (value || whoInput?.value) : (whoInput?.value || null),
+        action_plan_when: field === 'when' ? (value || whenInput?.value) : (whenInput?.value || null)
+      };
+
+      // Отправляем на сервер
+      await fetch(`/api/sessions/${currentSession.id}/items/${itemId}/action-plan`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+
+      // Обновляем локально
+      const item = currentSession?.items?.find(i => i.id === itemId);
+      if (item) {
+        if (data.action_plan_text !== null) item.action_plan_text = data.action_plan_text;
+        if (data.action_plan_who !== null) item.action_plan_who = data.action_plan_who;
+        if (data.action_plan_when !== null) item.action_plan_when = data.action_plan_when;
+      }
+
+      console.log('[ActionPlan] Saved:', { itemId, field, who: data.action_plan_who, when: data.action_plan_when });
+    } catch (error) {
+      console.error('[ActionPlan] Error saving:', error);
+    }
+  };
+
+  if (realtime) {
+    // Реальное время - отправляем сразу через WebSocket
+    const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
+    const whoInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="who"]`);
+    const whenInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="when"]`);
+    
+    socket.emit('action-plan:update', {
+      sessionId: currentSession.id,
+      itemId,
+      action_plan_text: field === 'text' ? editor?.innerHTML : null,
+      action_plan_who: field === 'who' ? (value || whoInput?.value) : null,
+      action_plan_when: field === 'when' ? (value || whenInput?.value) : null
+    });
+  } else {
+    // Отложенное сохранение
+    saveActionPlanTimeout = setTimeout(doSave, 500);
+  }
+}
+
+// Сохранение при расфокусировке редактора
+function handleActionPlanBlur(itemId) {
+  const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
+  if (editor) {
+    saveActionPlan(itemId, 'text');
+  }
+}
+
+// Автосохранение планов действий каждые 5 секунд
+let actionPlanAutoSaveInterval = null;
+
+function startActionPlanAutoSave() {
+  // Очищаем предыдущий интервал если есть
+  if (actionPlanAutoSaveInterval) {
+    clearInterval(actionPlanAutoSaveInterval);
+  }
+
+  actionPlanAutoSaveInterval = setInterval(async () => {
+    if (!currentSession || currentTab !== 'discussion') return;
+
+    // Находим все редакторы планов действий
+    const editors = document.querySelectorAll('.action-plan-editor');
+    editors.forEach(async (editor) => {
+      const itemId = editor.dataset.itemId;
+      if (!itemId) return;
+
+      const item = currentSession?.items?.find(i => i.id === itemId);
+      if (!item) return;
+
+      // Используем innerHTML для сохранения форматирования
+      const currentHtml = editor.innerHTML;
+      // Ищем input в том же wrapper
+      const wrapper = editor.closest('.discussion-item-plan') || editor.closest('.action-plan-section');
+      const whoInput = wrapper?.querySelector(`input[data-item-id="${itemId}"][onchange*="who"]`);
+      const whenInput = wrapper?.querySelector(`input[data-item-id="${itemId}"][onchange*="when"]`);
+
+      // Проверяем есть ли изменения
+      const hasChanges = currentHtml !== (item.action_plan_text || '') ||
+                        (whoInput && whoInput.value !== (item.action_plan_who || '')) ||
+                        (whenInput && whenInput.value !== (item.action_plan_when || ''));
+
+      if (!hasChanges) return;
+
+      try {
+        await fetch(`/api/sessions/${currentSession.id}/items/${itemId}/action-plan`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action_plan_text: currentHtml,
+            action_plan_who: whoInput ? whoInput.value : null,
+            action_plan_when: whenInput ? whenInput.value : null
+          })
+        });
+
+        // Обновляем локально
+        item.action_plan_text = currentHtml;
+        if (whoInput) item.action_plan_who = whoInput.value;
+        if (whenInput) item.action_plan_when = whenInput.value;
+
+        console.log('[ActionPlan] Auto-saved:', itemId, { who: whoInput?.value, when: whenInput?.value });
+      } catch (error) {
+        console.error('[ActionPlan] Auto-save error:', error);
+      }
+    });
+  }, 5000); // Каждые 5 секунд
+
+  console.log('[ActionPlan] Auto-save started');
+}
+
+function stopActionPlanAutoSave() {
+  if (actionPlanAutoSaveInterval) {
+    clearInterval(actionPlanAutoSaveInterval);
+    actionPlanAutoSaveInterval = null;
+    console.log('[ActionPlan] Auto-save stopped');
   }
 }
 
@@ -1513,23 +2287,14 @@ function createItemHtml(item) {
   }
 
   let content = '';
-  if (item.type === 'meme') {
-    content = `<img src="${item.text}" alt="Meme" class="retro-item-meme" onerror="this.src='https://via.placeholder.com/300x200?text=Image+not+found'">`;
-  } else if (item.type === 'emoji') {
-    content = `<div class="retro-item-emoji">${item.text}</div>`;
-  } else {
-    // Преобразуем \n в <br> для отображения переносов строк
-    // Сначала обрабатываем markdown-картинки ![alt](url)
-    let processedText = escapeHtml(item.text);
-
-    // Проверяем, есть ли в тексте markdown-картинки
-    const hasMarkdownImages = /!\[(.*?)\]\((.*?)\)/g.test(processedText);
-
-    // Класс для длинного текста (с прокруткой)
-    const textClass = item.text && item.text.length > 300 ? 'retro-item-text long-text' : 'retro-item-text';
-
+  if (item.type === 'meme' || (item.text && /!\[(.*?)\]\((.*?)\)/g.test(item.text))) {
+    // Для типа meme или текста с markdown картинками
+    // Проверяем, есть ли в тексте markdown картинки
+    const hasMarkdownImages = /!\[(.*?)\]\((.*?)\)/g.test(item.text || '');
+    
     if (hasMarkdownImages) {
-      // Если есть картинки, рендерим как смешанный контент
+      // Рендерим как смешанный контент - текст + картинки
+      let processedText = escapeHtml(item.text || '');
       const parts = processedText.split(/(!\[.*?\]\(.*?\))/g);
       content = '<div class="retro-item-mixed-content">';
       parts.forEach(part => {
@@ -1542,17 +2307,24 @@ function createItemHtml(item) {
             .replace(/─────────────/g, '<hr class="item-divider">')
             .replace(/\n/g, '<br>');
           if (textPart.trim()) {
-            content += `<p class="${textClass}">${textPart}</p>`;
+            content += `<p class="retro-item-text">${textPart}</p>`;
           }
         }
       });
       content += '</div>';
-    } else {
-      // Простой текст без картинок
-      const textWithBreaks = processedText
-        .replace(/\n/g, '<br>');
-      content = `<p class="${textClass}">${textWithBreaks}</p>`;
+    } else if (item.type === 'meme') {
+      // Только мем без текста
+      let memeUrl = item.meme_url || item.text || '';
+      content = `<img src="${memeUrl}" alt="Meme" class="retro-item-meme" onerror="this.style.display='none'">`;
     }
+  } else if (item.type === 'emoji') {
+    content = `<div class="retro-item-emoji">${item.text}</div>`;
+  } else {
+    // Преобразуем \n в <br> для отображения переносов строк
+    let processedText = escapeHtml(item.text);
+    const textClass = 'retro-item-text';
+    const textWithBreaks = processedText.replace(/\n/g, '<br>');
+    content = `<p class="${textClass}">${textWithBreaks}</p>`;
   }
   
   // Фильтруем только те реакции, которые имеют count > 0
@@ -1598,16 +2370,43 @@ function createItemHtml(item) {
   const isMerged = item.text && item.text.includes('─────────────');
   const mergedBadge = isMerged ? `<span class="merged-badge" title="Объединённая карточка (можно разъединить)"><span class="material-icons" style="font-size: 12px;">call_merge</span></span>` : '';
 
+  // Проверяем, может ли пользователь редактировать карточку (создатель или админ)
+  const canEdit = isAdmin || (currentUserId && currentUserId.replace(/^(admin_|user_)/, '') === author);
+
+  // Чекбокс для обсуждения (показывается после завершения сессии)
+  const discussionCheckbox = sessionEnded ? `
+    <label class="discussion-checkbox" title="Добобавить в обсуждение">
+      <input type="checkbox" class="form-check-input" data-item-id="${item.id}" 
+             ${selectedDiscussionItems.has(item.id) ? 'checked' : ''}
+             onchange="toggleDiscussionItem('${item.id}')">
+      <span class="material-icons" style="font-size: 16px;">forum</span>
+    </label>
+  ` : '';
+
+  // Кнопка редактирования
+  const editButton = canEdit ? `
+    <button class="item-action-btn" onclick="editItem('${item.id}')" title="Редактировать">
+      <span class="material-icons" style="font-size: 16px;">edit</span>
+    </button>
+  ` : '';
+
   // Кнопка разделения показывается только для объединённых карточек
-  const splitButton = (isAdmin && isMerged) ? `
+  const splitButton = (isAdmin && isMerged && !sessionEnded) ? `
     <button class="item-action-btn split" onclick="splitItem('${item.id}')" title="Разъединить карточку">
       <span class="material-icons" style="font-size: 16px;">call_split</span>
     </button>
   ` : '';
 
   return `
-    <div class="retro-item status-${item.status} ${isMerged ? 'merged-item' : ''}" id="item-${item.id}" data-id="${item.id}" data-order="${item.order || 0}" draggable="true">
+    <div class="retro-item status-${item.status} ${isMerged ? 'merged-item' : ''} ${currentTab === 'discussion' ? 'discussion-item' : ''}" id="item-${item.id}" data-id="${item.id}" data-order="${item.order || 0}" data-category="${item.category || ''}" draggable="${currentTab !== 'discussion'}">
       <div class="retro-item-header">
+        ${discussionCheckbox}
+        ${currentTab === 'discussion' ? `
+          <div class="category-badge-full" title="Категория: ${escapeHtml(item.category || '')}">
+            <span class="material-icons" style="font-size: 24px;">label</span>
+            <strong style="font-size: 18px;">${getCategoryName(item.category)}</strong>
+          </div>
+        ` : ''}
         <span class="retro-item-author">
           <span class="material-icons" style="font-size: 14px;">person</span>
           ${escapeHtml(author)}
@@ -1621,14 +2420,74 @@ function createItemHtml(item) {
       <div class="retro-item-footer">
         ${reactionsHtml}
         <div class="item-actions">
+          ${editButton}
+          ${isAdmin ? splitButton : ''}
           ${isAdmin ? `
-            ${splitButton}
             <button class="item-action-btn delete" onclick="deleteItem('${item.id}')" title="Удалить">
               <span class="material-icons" style="font-size: 16px;">delete</span>
             </button>
           ` : ''}
         </div>
       </div>
+      ${currentTab === 'discussion' ? `
+        <div class="action-plan-section" style="display:none;">
+          <div class="action-plan-header">
+            <span class="material-icons" style="font-size: 16px;">assignment</span>
+            <strong>План действий</strong>
+          </div>
+          <div class="action-plan-toolbar" id="toolbar-${item.id}">
+            <button class="toolbar-btn" type="button" onclick="event.stopPropagation(); formatActionPlan('${item.id}', 'bold')" title="Жирный">
+              <span class="material-icons">format_bold</span>
+            </button>
+            <button class="toolbar-btn" type="button" onclick="event.stopPropagation(); formatActionPlan('${item.id}', 'italic')" title="Курсив">
+              <span class="material-icons">format_italic</span>
+            </button>
+            <button class="toolbar-btn" type="button" onclick="event.stopPropagation(); formatActionPlan('${item.id}', 'underline')" title="Подчёркнутый">
+              <span class="material-icons">format_underlined</span>
+            </button>
+            <button class="toolbar-btn reset-btn" type="button" onclick="event.stopPropagation(); resetActionPlanFormat('${item.id}')" title="Сбросить форматирование">
+              <span class="material-icons">format_clear</span>
+            </button>
+            <select class="toolbar-select" onclick="event.stopPropagation();" onchange="formatActionPlan('${item.id}', 'fontName', this.value)" title="Шрифт">
+              <option value="Arial">Arial</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Courier New">Courier New</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Verdana">Verdana</option>
+            </select>
+            <select class="toolbar-select" onclick="event.stopPropagation();" onchange="formatActionPlan('${item.id}', 'fontSize', this.value)" title="Размер">
+              <option value="1">Маленький</option>
+              <option value="3" selected>Средний</option>
+              <option value="5">Большой</option>
+              <option value="7">Огромный</option>
+            </select>
+            <input type="color" class="toolbar-color" onclick="event.stopPropagation();" onchange="formatActionPlan('${item.id}', 'foreColor', this.value)" title="Цвет текста" value="#000000">
+          </div>
+          <div class="action-plan-editor" contenteditable="true"
+               data-item-id="${item.id}"
+               oninput="saveActionPlan('${item.id}', 'text', null, true)"
+               onblur="handleActionPlanBlur('${item.id}')"
+               placeholder="Введите план действий...">${item.action_plan_text || ''}</div>
+          <div class="action-plan-fields">
+            <div class="action-plan-field">
+              <label><span class="material-icons" style="font-size: 14px;">person</span> Кому:</label>
+              <input type="text" class="form-control form-control-sm"
+                     data-item-id="${item.id}"
+                     value="${item.action_plan_who || ''}"
+                     onchange="saveActionPlan('${item.id}', 'who', this.value)"
+                     placeholder="ФИО ответственного">
+            </div>
+            <div class="action-plan-field">
+              <label><span class="material-icons" style="font-size: 14px;">event</span> Когда:</label>
+              <input type="text" class="form-control form-control-sm"
+                     data-item-id="${item.id}"
+                     value="${item.action_plan_when || ''}"
+                     onchange="saveActionPlan('${item.id}', 'when', this.value)"
+                     placeholder="Срок выполнения">
+            </div>
+          </div>
+        </div>
+      ` : ''}
     </div>
   `;
 }
@@ -1697,26 +2556,13 @@ function toggleEmojiDropdown(event, itemId) {
   }
 }
 
-// Установка реакции (только одна на пользователя)
+// Установка реакции (только одна на пользователя на карточку)
 async function setReaction(itemId, emoji, reactionName) {
   if (!currentSession) return;
 
   // Проверяем, есть ли уже реакция у пользователя на этой карточке
   const currentReaction = userReactions[itemId];
   const isSameReaction = currentReaction === reactionName;
-
-  // Проверяем лимит голосов (для не-админов) - только если ставим новую реакцию
-  if (!isAdmin && !isSameReaction) {
-    // Считаем количество УНИКАЛЬНЫХ карточек, где пользователь поставил реакцию
-    const userReactionItems = Object.keys(userReactions);
-    const hasReactionOnThisItem = currentReaction;
-
-    // Если на этой карточке ещё нет реакции и лимит исчерпан — блокируем
-    if (!hasReactionOnThisItem && userReactionItems.length >= voteLimit) {
-      showToast(`Максимум ${voteLimit} голосов!`, 'warning');
-      return;
-    }
-  }
 
   // Закрываем dropdown
   const menu = document.getElementById(`emoji-menu-${itemId}`);
@@ -1832,6 +2678,11 @@ function handleItemDragOver(e) {
   e.preventDefault();
   e.stopPropagation();
 
+  // Если голосование было начато - не показываем группировку
+  if (votingStarted) {
+    return;
+  }
+
   if (this === draggedItem) return;
 
   dragOverItem = this;
@@ -1863,6 +2714,11 @@ function handleItemDragLeave(e) {
 }
 
 function showGroupingPreview(targetItem) {
+  // Если голосование было начато - не показываем группировку
+  if (votingStarted) {
+    return;
+  }
+
   targetItem.style.boxShadow = '0 0 0 3px #6366f1';
   shouldGroupItems = true;
   showToast('Отпустите для объединения карточек', 'info');
@@ -1896,6 +2752,11 @@ function handleItemDrop(e) {
   // Группировка (удержание 1 секунду)
   if (shouldGroupItems) {
     shouldGroupItems = false;
+    // Если голосование было начато - не объединяем
+    if (votingStarted) {
+      showToast('Объединение карточек недоступно после начала голосования', 'warning');
+      return;
+    }
     mergeItems(sourceElement, targetElement);
     return;
   }
@@ -2109,6 +2970,12 @@ async function swapItems(sourceElement, targetElement) {
 
 // Объединение двух карточек
 async function mergeItems(sourceElement, targetElement) {
+  // Проверяем, было ли начато голосование в этой сессии
+  if (votingStarted) {
+    showToast('Объединение карточек недоступно после начала голосования', 'warning');
+    return;
+  }
+
   const sourceId = sourceElement.dataset.id;
   const targetId = targetElement.dataset.id;
 
@@ -2189,25 +3056,34 @@ async function mergeItems(sourceElement, targetElement) {
     let mergedUserReactions = { ...targetUserReactions, ...sourceUserReactions };
 
     // Сохраняем данные о каждой части для последующего разделения
-    // Используем existingMergedPartsData который уже распарсен выше
-    let mergedPartsData = existingMergedPartsData;
+    let mergedPartsData = [];
 
-    // Всегда сохраняем текущие данные target карточки как первую часть
-    // Это нужно, даже если merged_parts_data уже существует (карточка уже была объединена)
-    const targetPartData = {
-      text: targetItem.text || '',
-      reactions: targetReactions,
-      user_reactions: targetUserReactions,
-      meme_url: targetItem.meme_url,
-      type: targetItem.type
-    };
-
-    // Если merged_parts_data пуст, добавляем target как первую часть
-    if (mergedPartsData.length === 0) {
-      mergedPartsData.push(targetPartData);
+    // Если target уже был объединён, используем существующие части
+    if (existingMergedPartsData.length > 0) {
+      // Копируем существующие части
+      mergedPartsData = existingMergedPartsData.map(part => ({...part}));
+      
+      // Обновляем первую часть с актуальными реакциями target (но сохраняем оригинальный текст и author)
+      const firstPartText = mergedPartsData[0]?.text || targetItem.text || '';
+      const firstPartAuthor = mergedPartsData[0]?.author || targetItem.author || 'Аноним';
+      mergedPartsData[0] = {
+        text: firstPartText,
+        reactions: targetReactions,
+        user_reactions: targetUserReactions,
+        meme_url: targetItem.meme_url,
+        type: targetItem.type,
+        author: firstPartAuthor
+      };
     } else {
-      // Если уже есть части, заменяем первую на актуальные данные target
-      mergedPartsData[0] = targetPartData;
+      // Target не был объединён, создаём новую запись для первой части
+      mergedPartsData.push({
+        text: targetItem.text || '',
+        reactions: targetReactions,
+        user_reactions: targetUserReactions,
+        meme_url: targetItem.meme_url,
+        type: targetItem.type,
+        author: targetItem.author || 'Аноним'
+      });
     }
 
     // Добавляем source как новую часть
@@ -2216,14 +3092,21 @@ async function mergeItems(sourceElement, targetElement) {
       reactions: sourceReactions,
       user_reactions: sourceUserReactions,
       meme_url: sourceItem.meme_url,
-      type: sourceItem.type
+      type: sourceItem.type,
+      author: sourceItem.author || 'Аноним'
     });
+
+    console.log('[Merge] mergedPartsData:', mergedPartsData);
+
+    // Обновляем author объединённой карточки на автора первой части (target)
+    const firstPartAuthor = mergedPartsData[0]?.author || targetItem.author || 'Аноним';
 
     const updateData = {
       text: mergedText,
       reactions: JSON.stringify(mergedReactions),
       user_reactions: JSON.stringify(mergedUserReactions),
-      merged_parts_data: JSON.stringify(mergedPartsData)
+      merged_parts_data: JSON.stringify(mergedPartsData),
+      author: firstPartAuthor
     };
 
     if (sourceItem.type === 'meme' && !targetItem.meme_url) {
@@ -2257,17 +3140,6 @@ async function toggleReaction(itemId, emoji, reactionName) {
   const currentReaction = userReactions[itemId];
   const isSameReaction = currentReaction === reactionName;
 
-  // Проверяем лимит голосов (для не-админов) - только если ставим новую реакцию
-  if (!isAdmin && !isSameReaction) {
-    const userReactionItems = Object.keys(userReactions);
-    const hasReactionOnThisItem = currentReaction;
-
-    if (!hasReactionOnThisItem && userReactionItems.length >= voteLimit) {
-      showToast(`Максимум ${voteLimit} голосов!`, 'warning');
-      return;
-    }
-  }
-
   try {
     const response = await fetch(`/api/sessions/${currentSession.id}/items/${itemId}/react`, {
       method: 'POST',
@@ -2294,6 +3166,12 @@ async function toggleReaction(itemId, emoji, reactionName) {
 // Разъединение карточки (разделение на отдельные карточки)
 // Открывает модальное окно для выбора какой фрагмент отделить
 async function splitItem(itemId) {
+  // Проверяем, было ли начато голосование в этой сессии
+  if (votingStarted) {
+    showToast('Разъединение карточек недоступно после начала голосования', 'warning');
+    return;
+  }
+
   if (!currentSession) return;
 
   try {
@@ -2521,11 +3399,26 @@ async function splitAllParts(itemId, item, parts) {
     const newOrder = baseOrder + i;
     const partText = parts[i].trim();
 
-    // Используем индекс для сопоставления частей (первая часть - это target, остальные - source)
-    // mergedPartsData[0] = target (первая карточка), mergedPartsData[1+] = добавленные карточки
-    const partData = mergedPartsData[i] || findPartDataByText(partText, mergedPartsData);
+    // Сначала пытаемся найти по индексу (для простого случая: target + source)
+    let partData = mergedPartsData[i];
+    
+    // Если не нашли по индексу, ищем по тексту
+    if (!partData) {
+      partData = findPartDataByText(partText, mergedPartsData);
+    }
+    
+    // Если всё ещё не нашли, используем первую часть как fallback
+    if (!partData && mergedPartsData.length > 0) {
+      console.warn('[Split] Could not find part data for index', i, 'using first part as fallback');
+      partData = mergedPartsData[0];
+    }
+    
     const partReactions = partData?.reactions || {};
     const partUserReactions = partData?.user_reactions || {};
+    // Приоритет: partData.author > mergedPartsData[0].author (автор первой части) > item.author
+    const partAuthor = partData?.author || (mergedPartsData[0]?.author && i === 0 ? mergedPartsData[0].author : item.author) || 'Аноним';
+
+    console.log('[Split] Part', i, ':', { partText: partText.substring(0, 30), partAuthor, partData });
 
     const promise = fetch(`/api/sessions/${currentSession.id}/items`, {
       method: 'POST',
@@ -2533,9 +3426,9 @@ async function splitAllParts(itemId, item, parts) {
       body: JSON.stringify({
         text: partText,
         category: category,
-        author: item.author || 'Аноним',
-        type: partData.type || 'text',
-        meme_url: partData.meme_url || null,
+        author: partAuthor,
+        type: partData?.type || 'text',
+        meme_url: partData?.meme_url || null,
         order: newOrder,
         reactions: JSON.stringify(partReactions),
         user_reactions: JSON.stringify(partUserReactions)
@@ -2598,6 +3491,9 @@ async function splitSelectedParts(itemId, item, parts, selectedIndices) {
     const partUserReactions = partData?.user_reactions || {};
     const partType = partData?.type || 'text';
     const partMemeUrl = partData?.meme_url || null;
+    const partAuthor = partData?.author || item.author || 'Аноним';
+
+    console.log(`[SplitSelected] Part ${i}: originalIndex=${originalIndex}, partAuthor=${partAuthor}, partData=`, partData);
 
     const promise = fetch(`/api/sessions/${currentSession.id}/items`, {
       method: 'POST',
@@ -2605,7 +3501,7 @@ async function splitSelectedParts(itemId, item, parts, selectedIndices) {
       body: JSON.stringify({
         text: partText,
         category: category,
-        author: item.author || 'Аноним',
+        author: partAuthor,
         type: partType,
         meme_url: partMemeUrl,
         order: newOrder,
@@ -2630,6 +3526,7 @@ async function splitSelectedParts(itemId, item, parts, selectedIndices) {
     let remainingUserReactions = {};
     let remainingType = 'text';
     let remainingMemeUrl = null;
+    let remainingAuthor = item.author || 'Аноним';
 
     // Если осталась одна часть - используем её данные по индексу
     if (unselectedParts.length === 1) {
@@ -2639,6 +3536,8 @@ async function splitSelectedParts(itemId, item, parts, selectedIndices) {
       remainingUserReactions = remainingPartData?.user_reactions || {};
       remainingType = remainingPartData?.type || 'text';
       remainingMemeUrl = remainingPartData?.meme_url || null;
+      remainingAuthor = remainingPartData?.author || item.author || 'Аноним';
+      console.log('[SplitSelected] Remaining (1 part):', { unselectedIndex, remainingAuthor, remainingPartData });
     } else {
       // Если несколько частей - суммируем реакции используя индексы
       const unselectedIndices = parts
@@ -2660,15 +3559,23 @@ async function splitSelectedParts(itemId, item, parts, selectedIndices) {
           remainingMemeUrl = partData.meme_url;
           remainingType = 'meme';
         }
+        
+        // Для первой части сохраняем author
+        if (i === 0) {
+          remainingAuthor = partData?.author || item.author || 'Аноним';
+        }
       }
     }
-    
+
+    console.log('[SplitSelected] Updating remaining item:', { remainingAuthor, remainingText: remainingText.trim() });
+
     await fetch(`/api/sessions/${currentSession.id}/items/${itemId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text: remainingText.trim(),
         order: baseOrder,
+        author: remainingAuthor,
         type: remainingType,
         meme_url: remainingMemeUrl,
         reactions: JSON.stringify(remainingReactions),
@@ -2709,6 +3616,8 @@ function updateItemInColumn(item) {
         console.log('[UI] Created new element in column', item.category);
       }
       updateColumnCount(item.category);
+      // Применяем режим голосования (показываем кнопки голосования если есть голоса)
+      applyVoteMode();
     } else {
       console.warn('[UI] Column not found for item', item.id, 'category', item.category);
     }
@@ -2754,6 +3663,8 @@ function updateItemInColumn(item) {
     initDraggable(newElement);
     // Сортируем колонку по порядку
     sortColumnByOrder(item.category);
+    // Применяем режим голосования (показываем кнопки голосования если есть голоса)
+    applyVoteMode();
     console.log('[UI] Updated element in same column', item.category);
   }
 }
@@ -2851,12 +3762,84 @@ function removeItemFromColumn(itemId) {
   console.log('[UI] removeItemFromColumn:', { id: itemId, elementExists: !!element });
   if (element) {
     const category = element.closest('.column-items')?.dataset.category;
+    // Очищаем голоса за эту карточку перед удалением
+    if (voteModeVotes[itemId]) {
+      delete voteModeVotes[itemId];
+    }
+    if (userVoteModeVotes.includes(itemId)) {
+      userVoteModeVotes = userVoteModeVotes.filter(id => id !== itemId);
+    }
     element.remove();
     if (category) updateColumnCount(category);
+    // Применяем режим голосования (обновляем кнопки голосования)
+    applyVoteMode();
     console.log('[UI] Removed element from column', category);
   } else {
     console.warn('[UI] Element not found for removal', itemId);
   }
+}
+
+// Редактирование элемента
+async function editItem(itemId) {
+  const itemElement = document.getElementById(`item-${itemId}`);
+  if (!itemElement) return;
+
+  // Находим данные элемента (можно получить из currentSession.items)
+  const item = currentSession.items?.find(i => i.id === itemId);
+  if (!item) {
+    showToast('Элемент не найден', 'warning');
+    return;
+  }
+
+  // Заполняем форму редактирования
+  const itemTextDiv = document.getElementById('item-text');
+  const categorySelect = document.getElementById('item-category');
+  const memeUrlInput = document.getElementById('item-meme-url');
+  const emojiInput = document.getElementById('item-emoji');
+
+  // Очищаем форму
+  itemTextDiv.innerHTML = '';
+  memeUrlInput.value = '';
+  emojiInput.value = '';
+  document.getElementById('emoji-preview').style.display = 'none';
+
+  // Если это мем с картинкой
+  if (item.type === 'meme' && item.text) {
+    // Проверяем, есть ли в тексте markdown изображения
+    const imgMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
+    if (imgMatch) {
+      // Вставляем изображение в contenteditable
+      const imgHtml = `<img src="${imgMatch[2]}" alt="${imgMatch[1]}" style="max-width: 200px; max-height: 150px; border-radius: 6px; margin: 4px; vertical-align: middle;">`;
+      itemTextDiv.innerHTML = imgHtml;
+      
+      // Если есть текст до изображения
+      const textBefore = item.text.split(imgMatch[0])[0];
+      if (textBefore) {
+        itemTextDiv.innerHTML = textBefore.replace(/\n/g, '<br>') + imgHtml;
+      }
+    } else if (item.meme_url) {
+      // Просто URL мема
+      const imgHtml = `<img src="${item.meme_url}" alt="Meme" style="max-width: 200px; max-height: 150px; border-radius: 6px; margin: 4px; vertical-align: middle;">`;
+      itemTextDiv.innerHTML = imgHtml;
+    }
+  } else if (item.type === 'emoji') {
+    emojiInput.value = item.text;
+    document.getElementById('emoji-preview-text').textContent = item.text;
+    document.getElementById('emoji-preview').style.display = 'block';
+  } else {
+    // Текст - просто вставляем
+    itemTextDiv.innerText = item.text;
+  }
+
+  // Устанавливаем категорию
+  categorySelect.value = item.category;
+
+  // Открываем модальное окно
+  const modal = new bootstrap.Modal(document.getElementById('addItemModal'));
+  modal.show();
+
+  // Сохраняем ID редактируемого элемента для обновления
+  itemTextDiv.dataset.editItemId = itemId;
 }
 
 // Удаление элемента (для админа)
@@ -2898,6 +3881,633 @@ function updateColumnCount(category) {
 function toggleAdminPanel() {
   const panel = document.getElementById('admin-panel');
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+// Переключение скрытия карточек других пользователей
+function toggleHideOthersCards(checked) {
+  hideOthersCards = checked;
+  // Отправляем событие всем участникам
+  socket.emit('view:settings', {
+    sessionId: currentSession.id,
+    hideOthersCards,
+    hideOthersVotes
+  });
+  // Сохраняем в localStorage для текущей сессии
+  if (currentSession) {
+    localStorage.setItem(`hideOthersCards_${currentSession.id}`, hideOthersCards);
+  }
+  applyViewSettings();
+  showToast(checked ? 'Показаны только ваши карточки' : 'Показаны все карточки', 'info');
+}
+
+// Переключение скрытия голосов других участников
+function toggleHideOthersVotes(checked) {
+  hideOthersVotes = checked;
+  // Отправляем событие всем участникам
+  socket.emit('view:settings', {
+    sessionId: currentSession.id,
+    hideOthersCards,
+    hideOthersVotes
+  });
+  applyViewSettings();
+  applyVoteMode(); // Обновляем голоса голосования
+  showToast(checked ? 'Голоса других участников скрыты' : 'Все голоса видны', 'info');
+}
+
+// Переключение режима голосования
+function toggleVoteMode() {
+  voteMode = !voteMode;
+
+  // Если включаем голосование - устанавливаем флаг (блокировка объединения/разъединения)
+  if (voteMode) {
+    votingStarted = true;
+  }
+
+  // Если выключаем голосование (нажали "Стоп") - показываем чекбоксы для обсуждения
+  if (!voteMode && votingStarted) {
+    sessionEnded = true;
+    // Сохраняем в localStorage
+    saveSession();
+    // Показываем вкладки
+    document.getElementById('session-tabs').style.display = 'flex';
+    // Перерисовываем карточки с чекбоксами - обновляем каждую карточку
+    document.querySelectorAll('.retro-item').forEach(itemEl => {
+      const itemId = itemEl.dataset.id;
+      const item = currentSession?.items?.find(i => i.id === itemId);
+      if (item) {
+        // Заменяем HTML карточки на новый с чекбоксом
+        const newHtml = createItemHtml(item);
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = newHtml;
+        const newItemEl = tempDiv.firstElementChild;
+        if (newItemEl) {
+          itemEl.replaceWith(newItemEl);
+          initDraggable(newItemEl);
+        }
+      }
+    });
+  }
+
+  // НЕ сбрасываем голоса при выключении - они остаются видимыми
+  // if (!voteMode) {
+  //   voteModeVotes = {};
+  //   userVoteModeVotes = [];
+  // }
+
+  // Отправляем событие всем участникам
+  socket.emit('vote:mode', {
+    sessionId: currentSession.id,
+    voteMode,
+    sessionEnded: !voteMode && votingStarted // Отправляем флаг завершения для клиентов
+  });
+  applyVoteMode();
+  showToast(voteMode ? 'Режим голосования включён' : 'Режим голосования выключен', 'info');
+}
+
+// Переключение между вкладками Brain storm и Обсуждение
+function switchToTab(tabName) {
+  currentTab = tabName;
+
+  // Сохраняем в localStorage
+  if (currentSession) {
+    localStorage.setItem(`retroSessionTab_${currentSession.id}`, tabName);
+  }
+
+  // Если переключаемся на обсуждение - запускаем автосохранение
+  if (tabName === 'discussion') {
+    startActionPlanAutoSave();
+  } else {
+    stopActionPlanAutoSave();
+  }
+
+  const brainstormContainer = document.getElementById('columns-container');
+  const discussionContainer = document.getElementById('discussion-container');
+  const brainstormTabBtn = document.getElementById('brainstorm-tab-btn');
+  const discussionTabBtn = document.getElementById('discussion-tab-btn');
+
+  if (tabName === 'brainstorm') {
+    brainstormContainer.style.display = '';
+    brainstormContainer.classList.remove('d-none');
+    discussionContainer.style.display = 'none';
+    discussionContainer.classList.add('d-none');
+    brainstormTabBtn.classList.add('active');
+    discussionTabBtn.classList.remove('active');
+    // Перерисовываем колонки чтобы убрать поля плана действий
+    renderColumnsForBrainstorm();
+  } else {
+    brainstormContainer.style.display = 'none';
+    brainstormContainer.classList.add('d-none');
+    discussionContainer.style.display = '';
+    discussionContainer.classList.remove('d-none');
+    brainstormTabBtn.classList.remove('active');
+    discussionTabBtn.classList.add('active');
+    // Загружаем голоса перед рендером обсуждения
+    loadVoteModeVotes();
+    renderDiscussionTab();
+  }
+}
+
+// Перерисовка колонок для Brain storm (без полей плана действий)
+function renderColumnsForBrainstorm() {
+  if (!currentSession) return;
+
+  // Очищаем колонки и перерисовываем все карточки из currentSession.items
+  document.querySelectorAll('.column-items').forEach(col => col.innerHTML = '');
+  
+  // Сортируем и добавляем элементы
+  const items = currentSession?.items || [];
+  items.sort((a, b) => {
+    if (a.category !== b.category) return a.category.localeCompare(b.category);
+    return (a.order || 0) - (b.order || 0);
+  });
+  
+  // Добавляем все карточки
+  items.forEach(item => addItemToColumn(item));
+  
+  // Загружаем голоса и применяем режим голосования после добавления всех карточек
+  setTimeout(() => {
+    loadVoteModeVotes();
+  }, 100);
+}
+
+// Переключение карточки для обсуждения
+async function toggleDiscussionItem(itemId) {
+  const isSelected = !selectedDiscussionItems.has(itemId);
+  
+  if (isSelected) {
+    selectedDiscussionItems.add(itemId);
+  } else {
+    selectedDiscussionItems.delete(itemId);
+  }
+
+  // Сохраняем в БД
+  try {
+    await fetch(`/api/sessions/${currentSession.id}/items/${itemId}/discussion`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ for_discussion: isSelected })
+    });
+  } catch (error) {
+    console.error('Error updating discussion status:', error);
+    // Откатываем локальное изменение при ошибке
+    if (isSelected) {
+      selectedDiscussionItems.delete(itemId);
+    } else {
+      selectedDiscussionItems.add(itemId);
+    }
+    showToast('Ошибка обновления статуса обсуждения', 'danger');
+    return;
+  }
+
+  // Отправляем событие всем участникам
+  socket.emit('discussion:toggle', {
+    sessionId: currentSession.id,
+    itemId,
+    selected: isSelected
+  });
+
+  // Обновляем счётчик
+  updateDiscussionCount();
+  
+  // Если мы во вкладке обсуждения - перерисовываем
+  if (currentTab === 'discussion') {
+    renderDiscussionTab();
+  }
+  
+  showToast(selectedDiscussionItems.has(itemId) ? 'Добавлено в обсуждение' : 'Удалено из обсуждения', 'info');
+}
+
+// Обновление счётчика карточек в обсуждении
+function updateDiscussionCount() {
+  const badge = document.getElementById('discussion-count-badge');
+  if (badge) {
+    badge.textContent = selectedDiscussionItems.size;
+  }
+}
+
+// Рендер вкладки обсуждения
+function renderDiscussionTab() {
+  const container = document.getElementById('discussion-items-container');
+  if (!container) return;
+
+  if (selectedDiscussionItems.size === 0) {
+    container.innerHTML = '<p class="text-muted text-center">Выберите карточки во вкладке "Brain storm" для обсуждения</p>';
+    return;
+  }
+
+  // Находим выбранные карточки в currentSession.items
+  const discussionItems = currentSession?.items?.filter(item => selectedDiscussionItems.has(item.id)) || [];
+
+  if (discussionItems.length === 0) {
+    container.innerHTML = '<p class="text-muted text-center">Выбранные карточки не найдены</p>';
+    return;
+  }
+
+  // Сортируем по порядку
+  discussionItems.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+  // Создаём обёртку для каждой карточки с планом действий справа
+  container.innerHTML = discussionItems.map(item => `
+    <div class="discussion-item-wrapper" data-item-id="${item.id}">
+      <div class="discussion-item-card">
+        ${createItemHtml(item)}
+      </div>
+      <div class="discussion-item-plan">
+        <div class="action-plan-section">
+          <div class="action-plan-header">
+            <span class="material-icons" style="font-size: 16px;">assignment</span>
+            <strong>План действий</strong>
+            <span class="category-badge" style="margin-left: auto;">${getCategoryName(item.category)}</span>
+          </div>
+          <div class="action-plan-toolbar" id="toolbar-${item.id}">
+            <button class="toolbar-btn" type="button" onclick="formatActionPlan('${item.id}', 'bold')" title="Жирный">
+              <span class="material-icons">format_bold</span>
+            </button>
+            <button class="toolbar-btn" type="button" onclick="formatActionPlan('${item.id}', 'italic')" title="Курсив">
+              <span class="material-icons">format_italic</span>
+            </button>
+            <button class="toolbar-btn" type="button" onclick="formatActionPlan('${item.id}', 'underline')" title="Подчёркнутый">
+              <span class="material-icons">format_underlined</span>
+            </button>
+            <button class="toolbar-btn reset-btn" type="button" onclick="resetActionPlanFormat('${item.id}')" title="Сбросить форматирование">
+              <span class="material-icons">format_clear</span>
+            </button>
+            <select class="toolbar-select" onchange="formatActionPlan('${item.id}', 'fontName', this.value)" title="Шрифт">
+              <option value="Arial">Arial</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Courier New">Courier New</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Verdana">Verdana</option>
+            </select>
+            <select class="toolbar-select" onchange="formatActionPlan('${item.id}', 'fontSize', this.value)" title="Размер">
+              <option value="1">Маленький</option>
+              <option value="3" selected>Средний</option>
+              <option value="5">Большой</option>
+              <option value="7">Огромный</option>
+            </select>
+            <input type="color" class="toolbar-color" onchange="formatActionPlan('${item.id}', 'foreColor', this.value)" title="Цвет текста" value="#000000">
+          </div>
+          <div class="action-plan-editor" contenteditable="true" 
+               data-item-id="${item.id}" 
+               oninput="saveActionPlan('${item.id}')"
+               onblur="handleActionPlanBlur('${item.id}')"
+               placeholder="Введите план действий...">${item.action_plan_text || ''}</div>
+          <div class="action-plan-fields">
+            <div class="action-plan-field">
+              <label><span class="material-icons" style="font-size: 14px;">person</span> Кому:</label>
+              <input type="text" class="form-control form-control-sm" 
+                     data-item-id="${item.id}"
+                     value="${escapeHtml(item.action_plan_who || '')}" 
+                     onchange="saveActionPlan('${item.id}', 'who', this.value)"
+                     placeholder="ФИО ответственного">
+            </div>
+            <div class="action-plan-field">
+              <label><span class="material-icons" style="font-size: 14px;">event</span> Когда:</label>
+              <input type="text" class="form-control form-control-sm" 
+                     data-item-id="${item.id}"
+                     value="${escapeHtml(item.action_plan_when || '')}" 
+                     onchange="saveActionPlan('${item.id}', 'when', this.value)"
+                     placeholder="Срок выполнения">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  // Инициализируем drag-n-drop для карточек
+  container.querySelectorAll('.retro-item').forEach(item => {
+    initDraggable(item);
+  });
+
+  // Для пользователей делаем поля только для чтения
+  if (!isAdmin) {
+    container.querySelectorAll('.action-plan-editor').forEach(editor => {
+      editor.contentEditable = 'false';
+      editor.style.background = '#f5f5f5';
+      editor.style.cursor = 'not-allowed';
+    });
+    container.querySelectorAll('.action-plan-field input').forEach(input => {
+      input.readOnly = true;
+      input.style.background = '#f5f5f5';
+      input.style.cursor = 'not-allowed';
+    });
+    container.querySelectorAll('.toolbar-btn, .toolbar-select, .toolbar-color').forEach(btn => {
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+      btn.style.pointerEvents = 'none';
+    });
+  } else {
+    // Запускаем автосохранение только для админа
+    startActionPlanAutoSave();
+  }
+
+  // Инициализируем изменение размера панелей
+  setTimeout(() => {
+    initDiscussionResize();
+    recalculatePlanWidths();
+  }, 100);
+}
+
+// Инициализация изменения размера панелей обсуждения
+function initDiscussionResize() {
+  // Изменение размера всего контейнера "Обсуждение"
+  const resizeHandle = document.getElementById('discussion-resize-handle');
+  const discussionContainer = document.getElementById('discussion-container');
+  
+  if (!resizeHandle || !discussionContainer) return;
+  
+  let isResizing = false;
+  let startX = 0;
+  let startWidth = 0;
+  
+  resizeHandle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    startX = e.clientX;
+    startWidth = discussionContainer.offsetWidth;
+    document.body.style.cursor = 'col-resize';
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    
+    const deltaX = e.clientX - startX;
+    const newWidth = startWidth + deltaX;
+    
+    // Минимальная ширина 600px, максимальная 90% экрана
+    const maxWidth = window.innerWidth * 0.9;
+    if (newWidth >= 600 && newWidth <= maxWidth) {
+      discussionContainer.style.flex = 'none';
+      discussionContainer.style.maxWidth = newWidth + 'px';
+      // Пересчитываем ширину блоков "План действий"
+      recalculatePlanWidths();
+    }
+  });
+  
+  document.addEventListener('mouseup', () => {
+    if (isResizing) {
+      isResizing = false;
+      document.body.style.cursor = '';
+      // После изменения размера контейнера пересчитываем все блоки
+      recalculatePlanWidths();
+    }
+  });
+  
+  // Изменение размера блока "План действий" (левый край)
+  const wrappers = document.querySelectorAll('.discussion-item-wrapper');
+  
+  wrappers.forEach(wrapper => {
+    const plan = wrapper.querySelector('.discussion-item-plan');
+    const card = wrapper.querySelector('.discussion-item-card');
+    if (!plan || !card) return;
+    
+    let planIsResizing = false;
+    let planStartX = 0;
+    let planStartWidth = 0;
+    let cardStartWidth = 0;
+    
+    plan.addEventListener('mousedown', (e) => {
+      const rect = plan.getBoundingClientRect();
+      const leftEdge = e.clientX <= rect.left + 8;
+      
+      if (leftEdge) {
+        planIsResizing = true;
+        planStartX = e.clientX;
+        planStartWidth = plan.offsetWidth;
+        cardStartWidth = card.offsetWidth;
+        document.body.style.cursor = 'col-resize';
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+      if (!planIsResizing) return;
+      
+      const deltaX = planStartX - e.clientX; // Инвертируем для правильного направления
+      const newPlanWidth = planStartWidth + deltaX;
+      const newCardWidth = cardStartWidth - deltaX;
+      
+      // Минимальная ширина 250px для каждой панели
+      if (newPlanWidth >= 250 && newCardWidth >= 250) {
+        plan.style.flex = 'none';
+        plan.style.width = newPlanWidth + 'px';
+        card.style.flex = 'none';
+        card.style.width = newCardWidth + 'px';
+      } else if (newPlanWidth < 250) {
+        // План действий слишком маленький - фиксируем на минимуме
+        plan.style.flex = 'none';
+        plan.style.width = '250px';
+        card.style.flex = 'none';
+        card.style.width = (wrapper.offsetWidth - 250 - 10) + 'px';
+      } else if (newCardWidth < 250) {
+        // Карточка слишком маленькая - фиксируем на минимуме, план действий занимает остальное
+        card.style.flex = 'none';
+        card.style.width = '250px';
+        plan.style.flex = 'none';
+        plan.style.width = (wrapper.offsetWidth - 250 - 10) + 'px';
+      }
+    });
+    
+    document.addEventListener('mouseup', () => {
+      if (planIsResizing) {
+        planIsResizing = false;
+        document.body.style.cursor = '';
+      }
+    });
+  });
+  
+  // Обработчик изменения размера окна
+  window.addEventListener('resize', () => {
+    recalculatePlanWidths();
+  });
+}
+
+// Пересчёт ширины блоков "План действий" при изменении размера контейнера
+function recalculatePlanWidths() {
+  const wrappers = document.querySelectorAll('.discussion-item-wrapper');
+  wrappers.forEach(wrapper => {
+    const plan = wrapper.querySelector('.discussion-item-plan');
+    const card = wrapper.querySelector('.discussion-item-card');
+    if (!plan || !card) return;
+    
+    // План действий занимает оставшееся место после карточки
+    const wrapperWidth = wrapper.offsetWidth;
+    const cardWidth = card.offsetWidth;
+    const newPlanWidth = wrapperWidth - cardWidth - 10; // 10px gap
+    
+    if (newPlanWidth >= 250) {
+      plan.style.flex = 'none';
+      plan.style.width = newPlanWidth + 'px';
+    }
+  });
+}
+
+
+// Применение настроек отображения
+function applyViewSettings() {
+  let visibleCount = 0;
+  let hiddenCount = 0;
+  
+  // Обновляем видимость карточек
+  document.querySelectorAll('.retro-item').forEach(item => {
+    const authorElement = item.querySelector('.retro-item-author');
+    if (!authorElement) return;
+
+    // Получаем только текст автора (второй child node после иконки)
+    // childNodes[0] = text node (пробел), childNodes[1] = material-icons, childNodes[2] = текст автора
+    let author = '';
+    authorElement.childNodes.forEach(node => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const text = node.textContent.trim();
+        if (text) author = text;
+      }
+    });
+    
+    // Получаем имя текущего пользователя без префикса
+    const currentUserName = currentUserId?.replace(/^(admin_|user_)/, '') || '';
+
+    // Админ всегда видит все карточки
+    if (isAdmin) {
+      item.style.display = '';
+      visibleCount++;
+    } else if (hideOthersCards) {
+      // Пользователь видит только свои карточки
+      if (author === currentUserName) {
+        item.style.display = '';
+        visibleCount++;
+      } else {
+        item.style.display = 'none';
+        hiddenCount++;
+      }
+    } else {
+      // Все видят все карточки
+      item.style.display = '';
+      visibleCount++;
+    }
+  });
+
+  // Обновляем видимость голосов (реакций)
+  document.querySelectorAll('.reaction-btn').forEach(btn => {
+    if (hideOthersVotes && !btn.classList.contains('active')) {
+      btn.style.opacity = '0.3';
+    } else {
+      btn.style.opacity = '1';
+    }
+  });
+
+  // Обновляем чекбоксы
+  const hideCardsCheckbox = document.getElementById('hide-others-cards');
+  const hideVotesCheckbox = document.getElementById('hide-others-votes');
+  if (hideCardsCheckbox) hideCardsCheckbox.checked = hideOthersCards;
+  if (hideVotesCheckbox) hideVotesCheckbox.checked = hideOthersVotes;
+}
+
+// Применение режима голосования
+function applyVoteMode() {
+  const voteModeBtn = document.getElementById('vote-mode-btn');
+  if (voteModeBtn) {
+    voteModeBtn.classList.toggle('btn-success', voteMode);
+    voteModeBtn.classList.toggle('btn-light', !voteMode);
+    voteModeBtn.innerHTML = voteMode
+      ? '<span class="material-icons" style="font-size: 16px; vertical-align: middle;">check</span> Стоп'
+      : '<span class="material-icons" style="font-size: 16px; vertical-align: middle;">thumb_up</span> Голосовать';
+  }
+
+  // Показываем кнопку голосования на карточках (всегда если есть голоса)
+  document.querySelectorAll('.retro-item').forEach(item => {
+    let voteBtn = item.querySelector('.quick-vote-btn');
+    const itemId = item.dataset.id;
+    
+    // Если скрытие голосов включено, показываем только свой голос
+    let voteCount = 0;
+    if (hideOthersVotes && !isAdmin) {
+      // Показываем только если пользователь голосовал за эту карточку
+      voteCount = userVoteModeVotes.includes(itemId) ? 1 : 0;
+    } else {
+      // Показываем все голоса
+      voteCount = voteModeVotes[itemId] || 0;
+    }
+
+    // Показываем кнопку если есть голоса ИЛИ режим голосования активен
+    const hasVotes = voteModeVotes[itemId] > 0;
+    const showButton = voteMode || hasVotes;
+
+    if (showButton) {
+      if (!voteBtn) {
+        // Создаём кнопку голосования
+        voteBtn = document.createElement('button');
+        voteBtn.className = 'quick-vote-btn';
+        voteBtn.innerHTML = '<span class="material-icons">thumb_up</span><span class="vote-count">' + voteCount + '</span>';
+        voteBtn.onclick = () => quickVote(itemId);
+        item.appendChild(voteBtn);
+      } else {
+        // Обновляем счётчик
+        const countSpan = voteBtn.querySelector('.vote-count');
+        if (countSpan) countSpan.textContent = voteCount;
+      }
+
+      // Обновляем активное состояние
+      if (userVoteModeVotes.includes(itemId)) {
+        voteBtn.classList.add('active');
+      } else {
+        voteBtn.classList.remove('active');
+      }
+
+      if (voteMode) {
+        voteBtn.style.display = 'flex';
+        voteBtn.style.pointerEvents = 'auto'; // Разрешаем клики
+        voteBtn.style.opacity = '1';
+      } else {
+        // После выключения режима - показываем но блокируем
+        voteBtn.style.display = 'flex';
+        voteBtn.style.pointerEvents = 'none'; // Блокируем клики
+        voteBtn.style.opacity = '0.7';
+      }
+    } else {
+      if (voteBtn) {
+        voteBtn.style.display = 'none';
+      }
+    }
+  });
+}
+
+// Быстрое голосование (крупный лайк)
+function quickVote(itemId) {
+  if (!voteMode) return;
+
+  // Проверяем, использовал ли уже голос на этой карточке
+  const alreadyVoted = userVoteModeVotes.includes(itemId);
+
+  if (alreadyVoted) {
+    // Забираем голос обратно
+    userVoteModeVotes = userVoteModeVotes.filter(id => id !== itemId);
+    voteModeVotes[itemId] = Math.max(0, (voteModeVotes[itemId] || 1) - 1);
+    if (voteModeVotes[itemId] === 0) delete voteModeVotes[itemId];
+  } else {
+    // Проверяем лимит
+    if (userVoteModeVotes.length >= voteLimit) {
+      showToast(`Максимум ${voteLimit} голосов!`, 'warning');
+      return;
+    }
+
+    // Отдаём голос
+    userVoteModeVotes.push(itemId);
+    voteModeVotes[itemId] = (voteModeVotes[itemId] || 0) + 1;
+  }
+
+  // Отправляем на сервер
+  socket.emit('vote:submit', {
+    sessionId: currentSession.id,
+    itemId,
+    userId: currentUserId,
+    voted: !alreadyVoted
+  });
+
+  // Обновляем UI сразу для отзывчивости
+  applyVoteMode();
 }
 
 // Изменение шаблона
@@ -3042,44 +4652,60 @@ function endSession() {
   modal.show();
 }
 
-// Добавление задачи
-function addActionItem() {
-  const container = document.getElementById('action-items-container');
-  container.insertAdjacentHTML('beforeend', `
-    <div class="input-group mb-2">
-      <input type="text" class="form-control action-item-input" placeholder="Задача">
-      <button class="btn btn-outline-danger" onclick="removeActionItem(this)">×</button>
-    </div>
-  `);
-}
-
-// Удаление задачи
-function removeActionItem(btn) {
-  btn.closest('.input-group').remove();
-}
-
 // Подтверждение завершения
 async function confirmEndSession() {
-  const summary = document.getElementById('session-summary').value;
-  const actionItems = Array.from(document.querySelectorAll('.action-item-input'))
-    .map(input => input.value.trim())
-    .filter(v => v);
+  // Сохраняем все планы действий перед завершением
+  await saveAllActionPlans();
   
   try {
     await fetch(`/api/sessions/${currentSession.id}/end`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ summary, actionItems })
+      body: JSON.stringify({ summary: '', actionItems: [] })
     });
-    
+
     bootstrap.Modal.getInstance(document.getElementById('endSessionModal')).hide();
     localStorage.removeItem('retroSession');
     showToast('Сессия завершена!', 'success');
-    
+
     setTimeout(() => goHome(), 2000);
   } catch (error) {
+    console.error('Error ending session:', error);
     showToast('Ошибка завершения сессии', 'danger');
   }
+}
+
+// Сохранение всех планов действий
+async function saveAllActionPlans() {
+  if (!currentSession) return;
+  
+  const editors = document.querySelectorAll('.action-plan-editor');
+  const promises = [];
+  
+  editors.forEach(editor => {
+    const itemId = editor.dataset.itemId;
+    if (!itemId) return;
+    
+    const whoInput = editor.parentElement?.querySelector(`input[data-item-id="${itemId}"][onchange*="who"]`);
+    const whenInput = editor.parentElement?.querySelector(`input[data-item-id="${itemId}"][onchange*="when"]`);
+    
+    const data = {
+      action_plan_text: editor.textContent,
+      action_plan_who: whoInput?.value || null,
+      action_plan_when: whenInput?.value || null
+    };
+    
+    promises.push(
+      fetch(`/api/sessions/${currentSession.id}/items/${itemId}/action-plan`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      })
+    );
+  });
+  
+  await Promise.all(promises);
+  console.log('[EndSession] All action plans saved');
 }
 
 // Быстрое завершение сессии из истории
@@ -3108,38 +4734,151 @@ async function exportResults(format) {
   try {
     const response = await fetch(`/api/sessions/${currentSession.id}/items`);
     const items = await response.json();
-    
+
     const data = {
       session: currentSession,
       items,
       exportedAt: new Date().toISOString()
     };
-    
+
     if (format === 'json') {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       downloadBlob(blob, `retro-${currentSession.id}.json`);
     } else if (format === 'pdf') {
+      // PDF экспорт - все карточки из Brain storm и Обсуждение
       let text = `Ретроспектива: ${currentSession.name}\n`;
       text += `ID: ${currentSession.id}\n`;
       text += `Дата: ${new Date(currentSession.created_at).toLocaleString()}\n`;
+      text += `Статус: ${currentSession.status}\n`;
       text += `=${'='.repeat(50)}\n\n`;
-      
+
       const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
+      
+      // Экспорт карточек по колонкам
       template.columns.forEach(col => {
         text += `${col.name}\n${'-'.repeat(30)}\n`;
         const colItems = items.filter(i => i.category === col.category);
         colItems.forEach(item => {
-          text += `  • ${item.text} (${item.author})\n`;
+          text += `  • ${item.text}\n`;
+          text += `    Автор: ${item.author}\n`;
+          
+          // Реакции
+          if (item.reactions) {
+            const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
+            const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
+            if (activeReactions.length > 0) {
+              text += `    Реакции: ${activeReactions.map(([name, count]) => `${name}:${count}`).join(' ')}\n`;
+            }
+          }
+          
+          // План действий
+          if (item.action_plan_text || item.action_plan_who || item.action_plan_when) {
+            text += `    План действий:\n`;
+            if (item.action_plan_text) text += `      ${item.action_plan_text}\n`;
+            if (item.action_plan_who) text += `      Кому: ${item.action_plan_who}\n`;
+            if (item.action_plan_when) text += `      Когда: ${item.action_plan_when}\n`;
+          }
+          text += '\n';
         });
-        text += '\n';
       });
-      
+
+      // Экспорт карточек из Обсуждения (выбранные)
+      const discussionItems = items.filter(i => i.for_discussion);
+      if (discussionItems.length > 0) {
+        text += `\nОбсуждение\n${'='.repeat(30)}\n`;
+        discussionItems.forEach(item => {
+          text += `\n${item.text}\n`;
+          text += `  Автор: ${item.author}\n`;
+          if (item.action_plan_text || item.action_plan_who || item.action_plan_when) {
+            text += `  План действий:\n`;
+            if (item.action_plan_text) text += `    ${item.action_plan_text}\n`;
+            if (item.action_plan_who) text += `    Кому: ${item.action_plan_who}\n`;
+            if (item.action_plan_when) text += `    Когда: ${item.action_plan_when}\n`;
+          }
+        });
+      }
+
       const blob = new Blob([text], { type: 'text/plain' });
       downloadBlob(blob, `retro-${currentSession.id}.txt`);
+    } else if (format === 'confluence') {
+      // Confluence экспорт - HTML формат
+      let html = `<h1>Ретроспектива: ${escapeHtml(currentSession.name)}</h1>\n`;
+      html += `<p><strong>ID:</strong> ${currentSession.id}<br>\n`;
+      html += `<strong>Дата:</strong> ${new Date(currentSession.created_at).toLocaleString()}<br>\n`;
+      html += `<strong>Статус:</strong> ${currentSession.status}</p>\n`;
+      html += `<hr>\n\n`;
+
+      const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
+      
+      // Таблица с карточками по колонкам
+      html += `<h2>Brain Storm</h2>\n`;
+      html += `<table class="wrapped" style="width:100%; border-collapse: collapse;">\n`;
+      html += `<thead><tr><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Категория</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Карточка</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Автор</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Реакции</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">План действий</th></tr></thead>\n`;
+      html += `<tbody>\n`;
+      
+      template.columns.forEach(col => {
+        const colItems = items.filter(i => i.category === col.category);
+        colItems.forEach(item => {
+          html += `<tr>\n`;
+          html += `<td style="border:1px solid #ccc; padding:8px;"><strong>${escapeHtml(col.name)}</strong></td>\n`;
+          html += `<td style="border:1px solid #ccc; padding:8px;">${escapeHtml(item.text)}</td>\n`;
+          html += `<td style="border:1px solid #ccc; padding:8px;">${escapeHtml(item.author)}</td>\n`;
+          
+          // Реакции
+          let reactionsHtml = '';
+          if (item.reactions) {
+            const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
+            const emojiMap = { 'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉', 'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩', 'hundred':'💯', 'pray':'🙏' };
+            const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
+            reactionsHtml = activeReactions.map(([name, count]) => `${emojiMap[name] || name} ${count}`).join(' ');
+          }
+          html += `<td style="border:1px solid #ccc; padding:8px;">${reactionsHtml}</td>\n`;
+          
+          // План действий
+          let planHtml = '';
+          if (item.action_plan_text) planHtml += `<p><strong>План:</strong> ${escapeHtml(item.action_plan_text)}</p>\n`;
+          if (item.action_plan_who) planHtml += `<p><strong>Кому:</strong> ${escapeHtml(item.action_plan_who)}</p>\n`;
+          if (item.action_plan_when) planHtml += `<p><strong>Когда:</strong> ${escapeHtml(item.action_plan_when)}</p>\n`;
+          html += `<td style="border:1px solid #ccc; padding:8px;">${planHtml || '-'}</td>\n`;
+          
+          html += `</tr>\n`;
+        });
+      });
+      
+      html += `</tbody>\n</table>\n\n`;
+
+      // Обсуждение
+      const discussionItems = items.filter(i => i.for_discussion);
+      if (discussionItems.length > 0) {
+        html += `<h2>Обсуждение</h2>\n`;
+        html += `<table class="wrapped" style="width:100%; border-collapse: collapse;">\n`;
+        html += `<thead><tr><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Карточка</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Автор</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">План действий</th></tr></thead>\n`;
+        html += `<tbody>\n`;
+        
+        discussionItems.forEach(item => {
+          html += `<tr>\n`;
+          html += `<td style="border:1px solid #ccc; padding:8px;">${escapeHtml(item.text)}</td>\n`;
+          html += `<td style="border:1px solid #ccc; padding:8px;">${escapeHtml(item.author)}</td>\n`;
+          
+          let planHtml = '';
+          if (item.action_plan_text) planHtml += `<p><strong>План:</strong> ${escapeHtml(item.action_plan_text)}</p>\n`;
+          if (item.action_plan_who) planHtml += `<p><strong>Кому:</strong> ${escapeHtml(item.action_plan_who)}</p>\n`;
+          if (item.action_plan_when) planHtml += `<p><strong>Когда:</strong> ${escapeHtml(item.action_plan_when)}</p>\n`;
+          html += `<td style="border:1px solid #ccc; padding:8px;">${planHtml || '-'}</td>\n`;
+          
+          html += `</tr>\n`;
+        });
+        
+        html += `</tbody>\n</table>\n`;
+      }
+
+      const blob = new Blob([html], { type: 'text/html' });
+      downloadBlob(blob, `retro-${currentSession.id}-confluence.html`);
     }
-    
+
     showToast('Экспорт выполнен!', 'success');
   } catch (error) {
+    console.error('Export error:', error);
     showToast('Ошибка экспорта', 'danger');
   }
 }
@@ -3197,48 +4936,88 @@ async function loadHistory() {
 // Просмотр деталей сессии
 let currentViewSessionId = null;
 async function viewSessionDetails(sessionId) {
-  currentViewSessionId = sessionId;
+  // Открываем сессию в режиме просмотра
+  await openSessionViewMode(sessionId);
+}
 
+// Открытие сессии в режиме просмотра (для завершённых сессий)
+async function openSessionViewMode(sessionId) {
   try {
     const response = await fetch(`/api/sessions/${sessionId}`);
     const session = await response.json();
+    
+    // Сохраняем текущую сессию если есть
+    const prevSession = currentSession;
+    const prevUserId = currentUserId;
+    const prevIsAdmin = isAdmin;
+    
+    // Устанавливаем сессию для просмотра
+    currentSession = session;
+    currentUserId = 'viewer_' + sessionId; // Временный ID для просмотра
+    isAdmin = false;
+    
+    // Показываем страницу сессии
+    showSessionPage();
+    
+    // Загружаем данные
+    await loadSessionData();
+    
+    // Блокируем редактирование
+    document.getElementById('admin-panel-btn').style.display = 'none';
+    document.getElementById('end-session-btn').style.display = 'none';
+    document.getElementById('admin-view-controls').style.display = 'none';
+    document.getElementById('vote-mode-btn').style.display = 'none';
+    
+    // Добавляем кнопку экспорта в режим просмотра
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'btn btn-outline-light btn-sm me-2';
+    exportBtn.innerHTML = '<span class="material-icons">download</span> Экспорт';
+    exportBtn.onclick = () => {
+      // Открываем меню экспорта
+      const exportMenu = document.createElement('div');
+      exportMenu.style.position = 'absolute';
+      exportMenu.style.top = '60px';
+      exportMenu.style.right = '100px';
+      exportMenu.style.background = 'white';
+      exportMenu.style.borderRadius = '8px';
+      exportMenu.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+      exportMenu.style.zIndex = '1000';
+      exportMenu.innerHTML = `
+        <button class="btn btn-sm btn-link w-100 text-start" onclick="exportResults('json'); this.closest('div').remove();">JSON</button>
+        <button class="btn btn-sm btn-link w-100 text-start" onclick="exportResults('pdf'); this.closest('div').remove();">PDF</button>
+        <button class="btn btn-sm btn-link w-100 text-start" onclick="exportResults('confluence'); this.closest('div').remove();">Confluence</button>
+      `;
+      document.body.appendChild(exportMenu);
+      setTimeout(() => exportMenu.remove(), 5000);
+    };
 
-    // Показываем итоги
-    const summaryEl = document.getElementById('session-summary-view');
-    if (session.summary) {
-      summaryEl.innerHTML = `<p class="mb-0">${escapeHtml(session.summary).replace(/\n/g, '<br>')}</p>`;
-    } else {
-      summaryEl.innerHTML = '<p class="text-muted mb-0">Нет итогов</p>';
-    }
+    // Показываем кнопку возврата
+    const backBtn = document.createElement('button');
+    backBtn.className = 'btn btn-outline-light btn-sm me-2';
+    backBtn.innerHTML = '<span class="material-icons">arrow_back</span> Назад';
+    backBtn.onclick = () => {
+      currentSession = prevSession;
+      currentUserId = prevUserId;
+      isAdmin = prevIsAdmin;
+      goHome();
+    };
 
-    // Показываем план действий
-    const actionsEl = document.getElementById('session-actions-view');
-    if (session.action_items) {
-      let actions = [];
-      try {
-        actions = JSON.parse(session.action_items);
-      } catch (e) {}
-
-      if (actions.length > 0) {
-        actionsEl.innerHTML = '<ul class="mb-0">' + actions.map(a => `<li>${escapeHtml(a)}</li>`).join('') + '</ul>';
-      } else {
-        actionsEl.innerHTML = '<p class="text-muted mb-0">Нет плана действий</p>';
+    // Вставляем кнопки перед заголовком
+    const header = document.querySelector('#session-page .d-flex.align-items-center');
+    if (header) {
+      const existingBack = header.querySelector('.back-to-history-btn');
+      if (!existingBack) {
+        backBtn.classList.add('back-to-history-btn');
+        exportBtn.classList.add('back-to-history-btn');
+        header.insertBefore(exportBtn, header.firstChild);
+        header.insertBefore(backBtn, header.firstChild);
       }
-    } else {
-      actionsEl.innerHTML = '<p class="text-muted mb-0">Нет плана действий</p>';
     }
-
-    // Загружаем и показываем все идеи
-    await loadSessionItemsView(sessionId);
-
-    // Показываем кнопку удаления только для завершённых
-    document.getElementById('delete-session-btn').style.display = session.status === 'active' ? 'none' : 'block';
-
-    const modal = new bootstrap.Modal(document.getElementById('viewSessionModal'));
-    modal.show();
+    
+    showToast('Режим просмотра завершённой сессии', 'info');
   } catch (error) {
-    console.error('Error loading session details:', error);
-    showToast('Ошибка загрузки деталей', 'danger');
+    console.error('Error opening session view:', error);
+    showToast('Ошибка открытия сессии', 'danger');
   }
 }
 
@@ -3369,6 +5148,16 @@ function showSessionPage() {
   document.getElementById('session-page').classList.remove('d-none');
   renderTimer();
   if (timerRunning) startTimerInterval();
+
+  // Показываем панель управления только админу
+  const adminViewControls = document.getElementById('admin-view-controls');
+  const userDisplay = document.getElementById('user-display');
+  if (adminViewControls) {
+    adminViewControls.style.setProperty('display', isAdmin ? 'flex' : 'none', 'important');
+  }
+  if (userDisplay) {
+    userDisplay.style.display = isAdmin ? 'none' : 'inline';
+  }
 }
 
 // Вернуться домой
@@ -3384,6 +5173,17 @@ function goHome() {
   currentSession = null;
   isAdmin = false;
   userReactions = {};
+  voteModeVotes = {};
+  userVoteModeVotes = [];
+  voteMode = false;
+  votingStarted = false; // Сбрасываем при выходе из сессии
+  sessionEnded = false; // Сбрасываем при выходе из сессии
+  currentTab = 'brainstorm'; // Сбрасываем вкладку
+  selectedDiscussionItems.clear(); // Очищаем выбранные карточки
+  
+  // Останавливаем автосохранение
+  stopActionPlanAutoSave();
+  
   participants.clear();
   addedItems.clear();
   stopTimerInterval();
