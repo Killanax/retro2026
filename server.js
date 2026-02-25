@@ -430,6 +430,8 @@ app.patch('/api/sessions/:id/items/:itemId/action-plan', async (req, res) => {
   const { id: sessionId } = req.params;
   const { action_plan_text, action_plan_who, action_plan_when } = req.body;
 
+  console.log('[ActionPlan API] Received:', { itemId, action_plan_text: action_plan_text?.substring(0, 30), action_plan_who, action_plan_when });
+
   try {
     const updates = [];
     const params = [];
@@ -454,14 +456,22 @@ app.patch('/api/sessions/:id/items/:itemId/action-plan', async (req, res) => {
 
     params.push(itemId);
 
-    await pool.query(`UPDATE items SET ${updates.join(', ')} WHERE id = $${paramIndex}`, params);
-
-    const updatedResult = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
-    const updatedItem = updatedResult.rows[0];
+    const updateSql = `UPDATE items SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`;
+    console.log('[ActionPlan API] SQL:', updateSql, params);
+    
+    const result = await pool.query(updateSql, params);
+    const updatedItem = result.rows[0];
+    
+    console.log('[ActionPlan API] Updated item:', { 
+      action_plan_text: updatedItem?.action_plan_text?.substring(0, 30), 
+      action_plan_who: updatedItem?.action_plan_who, 
+      action_plan_when: updatedItem?.action_plan_when 
+    });
 
     io.to(sessionId).emit('item:updated', updatedItem);
     res.json(updatedItem);
   } catch (err) {
+    console.error('[ActionPlan API] Error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -836,15 +846,43 @@ io.on('connection', (socket) => {
   });
 
   // Обновление плана действий в реальном времени
-  socket.on('action-plan:update', (data) => {
-    const { sessionId, itemId, action_plan_text, action_plan_who, action_plan_when } = data;
+  socket.on('action-plan:update', async (data) => {
+    const { sessionId, itemId, action_plan_text, action_plan_who, action_plan_when, userId } = data;
+    
+    // Сохраняем в БД
+    try {
+      const updates = [];
+      const params = [];
+      let paramIndex = 1;
+
+      if (action_plan_text !== undefined && action_plan_text !== null) {
+        updates.push(`action_plan_text = $${paramIndex++}`);
+        params.push(action_plan_text);
+      }
+      if (action_plan_who !== undefined && action_plan_who !== null) {
+        updates.push(`action_plan_who = $${paramIndex++}`);
+        params.push(action_plan_who);
+      }
+      if (action_plan_when !== undefined && action_plan_when !== null) {
+        updates.push(`action_plan_when = $${paramIndex++}`);
+        params.push(action_plan_when);
+      }
+
+      if (updates.length > 0) {
+        params.push(itemId);
+        await pool.query(`UPDATE items SET ${updates.join(', ')} WHERE id = $${paramIndex}`, params);
+      }
+    } catch (err) {
+      console.error('Error saving action-plan update:', err);
+    }
+    
     // Отправляем всем кроме отправителя
     socket.to(sessionId).emit('action-plan:update', {
       itemId,
       action_plan_text,
       action_plan_who,
       action_plan_when,
-      userId: socket.handshake.query.userId
+      userId
     });
   });
 

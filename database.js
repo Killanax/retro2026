@@ -100,6 +100,8 @@ async function createTables(client) {
       action_items TEXT,
       vote_limit INTEGER DEFAULT 5,
       column_headers TEXT,
+      hide_others_cards BOOLEAN DEFAULT false,
+      hide_others_votes BOOLEAN DEFAULT false,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       ended_at TIMESTAMP
     )
@@ -120,6 +122,10 @@ async function createTables(client) {
       reactions TEXT DEFAULT '{}',
       user_reactions TEXT DEFAULT '{}',
       merged_parts_data TEXT,
+      for_discussion BOOLEAN DEFAULT false,
+      action_plan_text TEXT,
+      action_plan_who TEXT,
+      action_plan_when TEXT,
       status TEXT DEFAULT 'new',
       "order" INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -184,6 +190,44 @@ async function createTables(client) {
       UNIQUE(session_id, user_id)
     )
   `);
+
+  // Миграции для существующих таблиц
+  await runMigrations(client);
+}
+
+async function runMigrations(client) {
+  try {
+    // Добавляем колонки action_plan если их нет
+    await client.query(`
+      ALTER TABLE items 
+      ADD COLUMN IF NOT EXISTS for_discussion BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS action_plan_text TEXT,
+      ADD COLUMN IF NOT EXISTS action_plan_who TEXT,
+      ADD COLUMN IF NOT EXISTS action_plan_when TEXT
+    `);
+    
+    await client.query(`
+      ALTER TABLE sessions 
+      ADD COLUMN IF NOT EXISTS hide_others_cards BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS hide_others_votes BOOLEAN DEFAULT false
+    `);
+    
+    // Создаём таблицу vote_mode_votes если нет
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vote_mode_votes (
+        id SERIAL PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(session_id, item_id, user_id)
+      )
+    `);
+    
+    console.log('✅ Database migrations completed');
+  } catch (err) {
+    console.error('⚠️ Migration error:', err.message);
+  }
 }
 
 async function loadMemesFromDb() {

@@ -392,6 +392,13 @@ function initSocket() {
   });
 
   socket.on('item:updated', (item) => {
+    console.log('[WS] item:updated received:', { 
+      id: item.id, 
+      action_plan_text: item.action_plan_text?.substring(0, 30), 
+      action_plan_who: item.action_plan_who, 
+      action_plan_when: item.action_plan_when 
+    });
+    
     if (currentSession && item.session_id === currentSession.id) {
       // Обновляем в currentSession.items
       if (currentSession?.items) {
@@ -421,18 +428,28 @@ function initSocket() {
       // Обновляем поля плана действий в обсуждении если они есть
       if (currentTab === 'discussion') {
         const editor = document.querySelector(`.action-plan-editor[data-item-id="${item.id}"]`);
-        const whoInput = document.querySelector(`input[data-item-id="${item.id}"][onchange*="who"]`);
-        const whenInput = document.querySelector(`input[data-item-id="${item.id}"][onchange*="when"]`);
-        
+        const wrapper = editor?.closest('.discussion-item-plan') || editor?.closest('.action-plan-section');
+        const inputs = wrapper?.querySelectorAll(`input[data-item-id="${item.id}"]`) || [];
+        const whoInput = inputs[0];
+        const whenInput = inputs[1];
+
         // Обновляем только если элемент не в фокусе (чтобы не мешать редактированию)
+        // И только если данные отличаются от текущих в DOM
         if (editor && document.activeElement !== editor && item.action_plan_text !== undefined) {
-          editor.innerHTML = item.action_plan_text || '';
+          const currentEditorHtml = editor.innerHTML;
+          if (currentEditorHtml !== (item.action_plan_text || '')) {
+            editor.innerHTML = item.action_plan_text || '';
+          }
         }
         if (whoInput && document.activeElement !== whoInput && item.action_plan_who !== undefined) {
-          whoInput.value = item.action_plan_who || '';
+          if (whoInput.value !== (item.action_plan_who || '')) {
+            whoInput.value = item.action_plan_who || '';
+          }
         }
         if (whenInput && document.activeElement !== whenInput && item.action_plan_when !== undefined) {
-          whenInput.value = item.action_plan_when || '';
+          if (whenInput.value !== (item.action_plan_when || '')) {
+            whenInput.value = item.action_plan_when || '';
+          }
         }
       }
     }
@@ -595,9 +612,11 @@ function initSocket() {
     // Обновляем UI только если мы во вкладке обсуждения
     if (currentTab === 'discussion') {
       const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
-      const whoInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="who"]`);
-      const whenInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="when"]`);
-      
+      const wrapper = editor?.closest('.discussion-item-plan') || editor?.closest('.action-plan-section');
+      const inputs = wrapper?.querySelectorAll(`input[data-item-id="${itemId}"]`) || [];
+      const whoInput = inputs[0];
+      const whenInput = inputs[1];
+
       // Обновляем только если элемент не в фокусе
       if (editor && document.activeElement !== editor && action_plan_text !== undefined) {
         editor.innerHTML = action_plan_text || '';
@@ -959,6 +978,38 @@ async function restoreSession() {
       }
 
       await loadSessionData();
+
+      // Восстанавливаем последнюю активную вкладку
+      const savedTab = localStorage.getItem(`retroSessionTab_${currentSession.id}`);
+      if (savedTab) {
+        // Если сессия завершена, показываем вкладки
+        if (sessionEnded) {
+          document.getElementById('session-tabs').style.display = 'flex';
+          switchToTab(savedTab);
+        } else {
+          // Если сессия не завершена, но была выбрана вкладка обсуждения, 
+          // возможно, пользователь был в режиме просмотра или админ перешёл в обсуждение
+          // Проверяем, есть ли у нас права на просмотр обсуждения
+          if (savedTab === 'discussion') {
+            // Показываем вкладки даже если сессия не завершена, чтобы пользователь мог переключиться
+            document.getElementById('session-tabs').style.display = 'flex';
+            switchToTab(savedTab);
+          } else {
+            // Для обычной сессии показываем вкладки, но переключаем на brain storm
+            document.getElementById('session-tabs').style.display = 'flex';
+            switchToTab('brainstorm');
+          }
+        }
+      } else {
+        // Если нет сохраненной вкладки, по умолчанию brain storm
+        if (sessionEnded) {
+          document.getElementById('session-tabs').style.display = 'flex';
+          switchToTab('brainstorm');
+        } else {
+          // Скрываем вкладки если сессия не завершена и нет сохраненной вкладки
+          document.getElementById('session-tabs').style.display = 'none';
+        }
+      }
 
       // Если это админ, скрываем вкладку "Создать"
       if (isAdmin) {
@@ -2140,65 +2191,191 @@ async function saveActionPlan(itemId, field = 'text', value = null, realtime = f
   const doSave = async () => {
     try {
       const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
-      const whoInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="who"]`);
-      const whenInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="when"]`);
+      const wrapper = editor?.closest('.discussion-item-plan') || editor?.closest('.action-plan-section');
+      const inputs = wrapper?.querySelectorAll(`input[data-item-id="${itemId}"]`) || [];
+      const whoInput = inputs[0];
+      const whenInput = inputs[1];
+
+      // Получаем текущие значения из DOM, если они не переданы напрямую
+      const currentText = editor?.innerHTML || '';
+      const currentWho = whoInput?.value || '';
+      const currentWhen = whenInput?.value || '';
 
       const data = {
         // Сохраняем HTML с форматированием
-        action_plan_text: field === 'text' ? editor?.innerHTML : null,
-        action_plan_who: field === 'who' ? (value || whoInput?.value) : (whoInput?.value || null),
-        action_plan_when: field === 'when' ? (value || whenInput?.value) : (whenInput?.value || null)
+        action_plan_text: field === 'text' ? (value !== null ? value : currentText) : currentText,
+        action_plan_who: field === 'who' ? (value !== null ? value : currentWho) : currentWho,
+        action_plan_when: field === 'when' ? (value !== null ? value : currentWhen) : currentWhen
       };
 
-      // Отправляем на сервер
-      await fetch(`/api/sessions/${currentSession.id}/items/${itemId}/action-plan`, {
+      console.log('[ActionPlan] Saving data:', { itemId, data });
+
+      // Отправляем на сервер для сохранения в БД
+      const response = await fetch(`/api/sessions/${currentSession.id}/items/${itemId}/action-plan`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
 
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[ActionPlan] Save failed:', response.status, errorText);
+        throw new Error(`Save failed: ${response.status} ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('[ActionPlan] Server response:', result);
+
       // Обновляем локально
       const item = currentSession?.items?.find(i => i.id === itemId);
       if (item) {
-        if (data.action_plan_text !== null) item.action_plan_text = data.action_plan_text;
-        if (data.action_plan_who !== null) item.action_plan_who = data.action_plan_who;
-        if (data.action_plan_when !== null) item.action_plan_when = data.action_plan_when;
+        if (result.action_plan_text !== undefined) item.action_plan_text = result.action_plan_text;
+        if (result.action_plan_who !== undefined) item.action_plan_who = result.action_plan_who;
+        if (result.action_plan_when !== undefined) item.action_plan_when = result.action_plan_when;
       }
 
-      console.log('[ActionPlan] Saved:', { itemId, field, who: data.action_plan_who, when: data.action_plan_when });
+      // Отправляем через WebSocket для real-time обновления у других пользователей
+      socket.emit('action-plan:update', {
+        sessionId: currentSession.id,
+        itemId,
+        userId: currentUserId,
+        action_plan_text: result.action_plan_text,
+        action_plan_who: result.action_plan_who,
+        action_plan_when: result.action_plan_when
+      });
+
+      console.log('[ActionPlan] Saved successfully:', { itemId, field, who: data.action_plan_who, when: data.action_plan_when });
     } catch (error) {
       console.error('[ActionPlan] Error saving:', error);
+      showToast('Ошибка сохранения плана действий', 'danger');
     }
   };
 
   if (realtime) {
-    // Реальное время - отправляем сразу через WebSocket
-    const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
-    const whoInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="who"]`);
-    const whenInput = document.querySelector(`input[data-item-id="${itemId}"][onchange*="when"]`);
-    
-    socket.emit('action-plan:update', {
-      sessionId: currentSession.id,
-      itemId,
-      action_plan_text: field === 'text' ? editor?.innerHTML : null,
-      action_plan_who: field === 'who' ? (value || whoInput?.value) : null,
-      action_plan_when: field === 'when' ? (value || whenInput?.value) : null
-    });
+    // Realtime - сохраняем сразу в БД и отправляем WebSocket
+    doSave();
   } else {
     // Отложенное сохранение
     saveActionPlanTimeout = setTimeout(doSave, 500);
   }
 }
 
-// Сохранение при расфокусировке редактора
+// Сохранение при расфокусировке редактора (только текст!)
 function handleActionPlanBlur(itemId) {
-  const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
-  if (editor) {
-    saveActionPlan(itemId, 'text');
+  // Не сохраняем здесь — saveActionPlan с realtime=true уже вызвался на oninput
+  console.log('[ActionPlan] Text blur (already saved on input):', itemId);
+}
+
+// Сохранение при расфокусировке поля "Кому" (вызывается с event)
+function handleActionPlanWhoBlur(event, itemId) {
+  const input = event.target;
+  const wrapper = input.closest('.discussion-item-plan') || input.closest('.action-plan-section');
+  const editor = wrapper?.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
+  const inputs = wrapper?.querySelectorAll(`input[data-item-id="${itemId}"]`) || [];
+  const whoInput = inputs[0];
+  const whenInput = inputs[1];
+
+  // Помечаем что только что сохранили
+  if (editor) editor.dataset.justSaved = 'true';
+  input.dataset.justSaved = 'true';
+  if (whenInput) whenInput.dataset.justSaved = 'true';
+  
+  // Получаем текущие значения из DOM
+  const text = editor?.innerHTML || '';
+  const who = whoInput?.value || '';
+  const when = whenInput?.value || '';
+  
+  // Обновляем item сразу чтобы автосохранение не видело "изменений"
+  const item = currentSession?.items?.find(i => i.id === itemId);
+  if (item) {
+    item.action_plan_text = text;
+    item.action_plan_who = who;
+    item.action_plan_when = when;
+  }
+  
+  // Сохраняем все поля с текущими значениями
+  saveActionPlanOnBlur(itemId, text, who, when);
+}
+
+// Сохранение при расфокусировке поля "Когда" (вызывается с event)
+function handleActionPlanWhenBlur(event, itemId) {
+  const input = event.target;
+  const wrapper = input.closest('.discussion-item-plan') || input.closest('.action-plan-section');
+  const editor = wrapper?.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
+  const inputs = wrapper?.querySelectorAll(`input[data-item-id="${itemId}"]`) || [];
+  const whoInput = inputs[0];
+  const whenInput = inputs[1];
+
+  // Помечаем что только что сохранили
+  if (editor) editor.dataset.justSaved = 'true';
+  if (whoInput) whoInput.dataset.justSaved = 'true';
+  input.dataset.justSaved = 'true';
+  
+  // Получаем текущие значения из DOM
+  const text = editor?.innerHTML || '';
+  const who = whoInput?.value || '';
+  const when = whenInput?.value || '';
+  
+  // Обновляем item сразу чтобы автосохранение не видело "изменений"
+  const item = currentSession?.items?.find(i => i.id === itemId);
+  if (item) {
+    item.action_plan_text = text;
+    item.action_plan_who = who;
+    item.action_plan_when = when;
+  }
+  
+  // Сохраняем все поля с текущими значениями
+  saveActionPlanOnBlur(itemId, text, who, when);
+}
+
+// Функция сохранения при blur (отправляет на сервер и обновляет локально)
+async function saveActionPlanOnBlur(itemId, text, who, when) {
+  try {
+    const item = currentSession?.items?.find(i => i.id === itemId);
+    
+    console.log('[ActionPlan] Before save:', { itemId, text: text?.substring(0, 50), who, when });
+    
+    // Формируем данные для отправки
+    const data = {
+      action_plan_text: text,
+      action_plan_who: who,
+      action_plan_when: when
+    };
+
+    // Отправляем на сервер
+    const res = await fetch(`/api/sessions/${currentSession.id}/items/${itemId}/action-plan`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    
+    const result = await res.json();
+    console.log('[ActionPlan] Server response:', result);
+
+    // Обновляем локально — это критично чтобы автосохранение не видело "изменений"
+    if (item) {
+      if (result.action_plan_text !== undefined) item.action_plan_text = result.action_plan_text;
+      if (result.action_plan_who !== undefined) item.action_plan_who = result.action_plan_who;
+      if (result.action_plan_when !== undefined) item.action_plan_when = result.action_plan_when;
+    }
+
+    // Отправляем через WebSocket для real-time обновления у других пользователей
+    socket.emit('action-plan:update', {
+      sessionId: currentSession.id,
+      itemId,
+      userId: currentUserId,
+      action_plan_text: result.action_plan_text,
+      action_plan_who: result.action_plan_who,
+      action_plan_when: result.action_plan_when
+    });
+
+    console.log('[ActionPlan] Saved on blur:', itemId, data);
+  } catch (error) {
+    console.error('[ActionPlan] Error saving on blur:', error);
   }
 }
 
-// Автосохранение планов действий каждые 5 секунд
+// Автосохранение планов действий каждые 3 секунды
 let actionPlanAutoSaveInterval = null;
 
 function startActionPlanAutoSave() {
@@ -2212,49 +2389,78 @@ function startActionPlanAutoSave() {
 
     // Находим все редакторы планов действий
     const editors = document.querySelectorAll('.action-plan-editor');
-    editors.forEach(async (editor) => {
+    for (const editor of editors) {
       const itemId = editor.dataset.itemId;
-      if (!itemId) return;
+      if (!itemId) continue;
 
       const item = currentSession?.items?.find(i => i.id === itemId);
-      if (!item) return;
+      if (!item) continue;
+
+      // Пропускаем если только что сохранили через blur
+      if (editor.dataset.justSaved === 'true') {
+        delete editor.dataset.justSaved;
+        continue;
+      }
 
       // Используем innerHTML для сохранения форматирования
       const currentHtml = editor.innerHTML;
       // Ищем input в том же wrapper
       const wrapper = editor.closest('.discussion-item-plan') || editor.closest('.action-plan-section');
-      const whoInput = wrapper?.querySelector(`input[data-item-id="${itemId}"][onchange*="who"]`);
-      const whenInput = wrapper?.querySelector(`input[data-item-id="${itemId}"][onchange*="when"]`);
+      const inputs = wrapper?.querySelectorAll(`input[data-item-id="${itemId}"]`) || [];
+      const whoInput = inputs[0];
+      const whenInput = inputs[1];
 
-      // Проверяем есть ли изменения
+      // Пропускаем если input только что сохранили
+      if (whoInput?.dataset.justSaved === 'true') delete whoInput.dataset.justSaved;
+      if (whenInput?.dataset.justSaved === 'true') delete whenInput.dataset.justSaved;
+
+      // Проверяем есть ли изменения (сравниваем с item, а не с '')
       const hasChanges = currentHtml !== (item.action_plan_text || '') ||
                         (whoInput && whoInput.value !== (item.action_plan_who || '')) ||
                         (whenInput && whenInput.value !== (item.action_plan_when || ''));
 
-      if (!hasChanges) return;
+      if (!hasChanges) continue;
 
       try {
-        await fetch(`/api/sessions/${currentSession.id}/items/${itemId}/action-plan`, {
+        const response = await fetch(`/api/sessions/${currentSession.id}/items/${itemId}/action-plan`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            action_plan_text: currentHtml,
-            action_plan_who: whoInput ? whoInput.value : null,
-            action_plan_when: whenInput ? whenInput.value : null
+            action_plan_text: currentHtml !== '' ? currentHtml : (item.action_plan_text || null),
+            action_plan_who: whoInput ? (whoInput.value !== '' ? whoInput.value : (item.action_plan_who || null)) : null,
+            action_plan_when: whenInput ? (whenInput.value !== '' ? whenInput.value : (item.action_plan_when || null)) : null
           })
         });
 
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[ActionPlan] Auto-save failed:', response.status, errorText);
+          throw new Error(`Auto-save failed: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
+
         // Обновляем локально
-        item.action_plan_text = currentHtml;
-        if (whoInput) item.action_plan_who = whoInput.value;
-        if (whenInput) item.action_plan_when = whenInput.value;
+        if (result.action_plan_text !== undefined) item.action_plan_text = result.action_plan_text;
+        if (result.action_plan_who !== undefined) item.action_plan_who = result.action_plan_who;
+        if (result.action_plan_when !== undefined) item.action_plan_when = result.action_plan_when;
+
+        // Отправляем через WebSocket для real-time обновления у других пользователей
+        socket.emit('action-plan:update', {
+          sessionId: currentSession.id,
+          itemId,
+          userId: currentUserId,
+          action_plan_text: result.action_plan_text,
+          action_plan_who: result.action_plan_who,
+          action_plan_when: result.action_plan_when
+        });
 
         console.log('[ActionPlan] Auto-saved:', itemId, { who: whoInput?.value, when: whenInput?.value });
       } catch (error) {
         console.error('[ActionPlan] Auto-save error:', error);
       }
-    });
-  }, 5000); // Каждые 5 секунд
+    }
+  }, 3000); // Каждые 3 секунды
 
   console.log('[ActionPlan] Auto-save started');
 }
@@ -2474,7 +2680,7 @@ function createItemHtml(item) {
               <input type="text" class="form-control form-control-sm"
                      data-item-id="${item.id}"
                      value="${item.action_plan_who || ''}"
-                     onchange="saveActionPlan('${item.id}', 'who', this.value)"
+                     onblur="handleActionPlanWhoBlur(event, '${item.id}')"
                      placeholder="ФИО ответственного">
             </div>
             <div class="action-plan-field">
@@ -2482,7 +2688,7 @@ function createItemHtml(item) {
               <input type="text" class="form-control form-control-sm"
                      data-item-id="${item.id}"
                      value="${item.action_plan_when || ''}"
-                     onchange="saveActionPlan('${item.id}', 'when', this.value)"
+                     onblur="handleActionPlanWhenBlur(event, '${item.id}')"
                      placeholder="Срок выполнения">
             </div>
           </div>
@@ -3975,8 +4181,10 @@ function switchToTab(tabName) {
 
   // Если переключаемся на обсуждение - запускаем автосохранение
   if (tabName === 'discussion') {
+    currentTab = 'discussion';
     startActionPlanAutoSave();
   } else {
+    currentTab = 'brainstorm';
     stopActionPlanAutoSave();
   }
 
@@ -4147,26 +4355,26 @@ function renderDiscussionTab() {
             </select>
             <input type="color" class="toolbar-color" onchange="formatActionPlan('${item.id}', 'foreColor', this.value)" title="Цвет текста" value="#000000">
           </div>
-          <div class="action-plan-editor" contenteditable="true" 
-               data-item-id="${item.id}" 
-               oninput="saveActionPlan('${item.id}')"
+          <div class="action-plan-editor" contenteditable="true"
+               data-item-id="${item.id}"
+               oninput="saveActionPlan('${item.id}', 'text', null, false)"
                onblur="handleActionPlanBlur('${item.id}')"
                placeholder="Введите план действий...">${item.action_plan_text || ''}</div>
           <div class="action-plan-fields">
             <div class="action-plan-field">
               <label><span class="material-icons" style="font-size: 14px;">person</span> Кому:</label>
-              <input type="text" class="form-control form-control-sm" 
+              <input type="text" class="form-control form-control-sm"
                      data-item-id="${item.id}"
-                     value="${escapeHtml(item.action_plan_who || '')}" 
-                     onchange="saveActionPlan('${item.id}', 'who', this.value)"
+                     value="${escapeHtml(item.action_plan_who || '')}"
+                     onblur="handleActionPlanWhoBlur(event, '${item.id}')"
                      placeholder="ФИО ответственного">
             </div>
             <div class="action-plan-field">
               <label><span class="material-icons" style="font-size: 14px;">event</span> Когда:</label>
-              <input type="text" class="form-control form-control-sm" 
+              <input type="text" class="form-control form-control-sm"
                      data-item-id="${item.id}"
-                     value="${escapeHtml(item.action_plan_when || '')}" 
-                     onchange="saveActionPlan('${item.id}', 'when', this.value)"
+                     value="${escapeHtml(item.action_plan_when || '')}"
+                     onblur="handleActionPlanWhenBlur(event, '${item.id}')"
                      placeholder="Срок выполнения">
             </div>
           </div>
@@ -4685,12 +4893,14 @@ async function saveAllActionPlans() {
   editors.forEach(editor => {
     const itemId = editor.dataset.itemId;
     if (!itemId) return;
-    
-    const whoInput = editor.parentElement?.querySelector(`input[data-item-id="${itemId}"][onchange*="who"]`);
-    const whenInput = editor.parentElement?.querySelector(`input[data-item-id="${itemId}"][onchange*="when"]`);
-    
+
+    const wrapper = editor.closest('.discussion-item-plan') || editor.closest('.action-plan-section');
+    const inputs = wrapper?.querySelectorAll(`input[data-item-id="${itemId}"]`) || [];
+    const whoInput = inputs[0];
+    const whenInput = inputs[1];
+
     const data = {
-      action_plan_text: editor.textContent,
+      action_plan_text: editor.innerHTML,
       action_plan_who: whoInput?.value || null,
       action_plan_when: whenInput?.value || null
     };
