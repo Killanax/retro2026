@@ -428,15 +428,14 @@ body {
   object-fit: contain;
   cursor: pointer;
   transition: border 0.2s;
+  position: relative;
 }
 
 .retro-item-meme.editing {
   border: 3px solid #6366f1;
-  resize: both;
-  overflow: auto;
   min-width: 100px;
   min-height: 100px;
-  cursor: se-resize;
+  cursor: nwse-resize;
 }
 
 .retro-item-emoji {

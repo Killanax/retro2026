@@ -3227,17 +3227,20 @@ function initDraggable(element) {
 function initMemeResize(element) {
   const memes = element.querySelectorAll('.retro-item-meme');
   memes.forEach(meme => {
+    let isResizing = false;
+    let startX, startY, startWidth, startHeight;
+
     meme.addEventListener('dblclick', function(e) {
       e.stopPropagation();
 
       // Если уже в режиме редактирования - выключаем
       if (this.classList.contains('editing')) {
         this.classList.remove('editing');
-        this.style.width = '';
-        this.style.height = '';
         saveMemeSize(this);
         // Включаем drag-and-drop обратно
         element.setAttribute('draggable', 'true');
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
       } else {
         // Включаем режим редактирования
         document.querySelectorAll('.retro-item-meme.editing').forEach(m => {
@@ -3251,12 +3254,57 @@ function initMemeResize(element) {
         this.classList.add('editing');
         // Отключаем drag-and-drop для этой карточки
         element.setAttribute('draggable', 'false');
-      }
-    });
 
-    // Сохраняем размер при изменении
-    meme.addEventListener('resize', function(e) {
-      e.stopPropagation();
+        // Добавляем обработчики для изменения размера
+        const memeEl = this;
+        const handleMouseMove = (e) => {
+          if (!isResizing) return;
+          e.preventDefault();
+          e.stopPropagation();
+
+          const newWidth = startWidth + (e.clientX - startX);
+          const newHeight = startHeight + (e.clientY - startY);
+
+          // Ограничиваем минимальный размер
+          if (newWidth >= 100) {
+            memeEl.style.width = newWidth + 'px';
+          }
+          if (newHeight >= 100) {
+            memeEl.style.height = newHeight + 'px';
+          }
+        };
+
+        const handleMouseUp = (e) => {
+          if (!isResizing) return;
+          isResizing = false;
+          e.preventDefault();
+          e.stopPropagation();
+          saveMemeSize(memeEl);
+          document.removeEventListener('mousemove', handleMouseMove);
+          document.removeEventListener('mouseup', handleMouseUp);
+        };
+
+        // Обработчик начала изменения размера (правый нижний угол)
+        memeEl.addEventListener('mousedown', function(e) {
+          // Проверяем, что клик в правом нижнем углу (20px)
+          const rect = this.getBoundingClientRect();
+          const offsetX = e.clientX - rect.left;
+          const offsetY = e.clientY - rect.top;
+
+          if (offsetX >= rect.width - 20 && offsetY >= rect.height - 20) {
+            e.preventDefault();
+            e.stopPropagation();
+            isResizing = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            startWidth = rect.width;
+            startHeight = rect.height;
+
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+          }
+        });
+      }
     });
   });
 
