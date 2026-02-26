@@ -1206,6 +1206,15 @@ async function returnToSession(sessionId) {
     const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
     const session = await sessionResponse.json();
 
+    // Очищаем состояние предыдущей сессии перед загрузкой новой
+    currentSession = null;
+    selectedDiscussionItems.clear();
+    userReactions = {};
+    voteModeVotes = {};
+    userVoteModeVotes = [];
+    participants.clear();
+    addedItems.clear();
+
     // Всегда устанавливаем currentSession
     currentSession = session;
 
@@ -1244,6 +1253,9 @@ async function returnToSession(sessionId) {
         currentUserId = 'user_' + userName;
       }
     }
+
+    // Сохраняем текущую сессию в localStorage
+    saveSession();
 
     console.log('[returnToSession] Returning to session:', { sessionId: currentSession.id, userId: currentUserId, isAdmin });
 
