@@ -1530,8 +1530,12 @@ async function loadSessionData() {
     // Применяем настройки отображения после загрузки всех карточек
     applyViewSettings();
 
-    // Восстанавливаем размеры мемов после загрузки items в currentSession
-    setTimeout(() => restoreMemeSizes(), 100);
+    // Восстанавливаем размеры мемов после полной загрузки DOM
+    console.log('[MemeSize] Scheduling restore after 200ms');
+    setTimeout(() => {
+      console.log('[MemeSize] Restoring now, currentSession.items:', currentSession?.items?.length);
+      restoreMemeSizes();
+    }, 200);
 
     // Если выбрана вкладка обсуждения - рендерим её после загрузки items
     if (sessionEnded && currentTab === 'discussion') {
@@ -3365,6 +3369,8 @@ function restoreMemeSizes() {
       if (item && item.meme_width && item.meme_height) {
         meme.style.width = item.meme_width;
         meme.style.height = item.meme_height;
+        meme.dataset.memeWidth = item.meme_width;
+        meme.dataset.memeHeight = item.meme_height;
         console.log('[MemeSize] Restored from currentSession:', itemId, item.meme_width, item.meme_height);
         return;
       }
@@ -3374,7 +3380,15 @@ function restoreMemeSizes() {
     if (savedSizes[itemId] && savedSizes[itemId].width && savedSizes[itemId].height) {
       meme.style.width = savedSizes[itemId].width;
       meme.style.height = savedSizes[itemId].height;
+      meme.dataset.memeWidth = savedSizes[itemId].width;
+      meme.dataset.memeHeight = savedSizes[itemId].height;
       console.log('[MemeSize] Restored from localStorage:', itemId, savedSizes[itemId].width, savedSizes[itemId].height);
+    }
+
+    // Если есть data-атрибуты (сохранены после предыдущего восстановления)
+    if (meme.dataset.memeWidth && meme.dataset.memeHeight) {
+      meme.style.width = meme.dataset.memeWidth;
+      meme.style.height = meme.dataset.memeHeight;
     }
   });
 }
