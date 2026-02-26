@@ -400,6 +400,12 @@ function initSocket() {
       return;
     }
 
+    // Игнорируем если элемент уже есть в currentSession.items (предотвращение дубликатов)
+    if (currentSession.items?.some(i => i.id === item.id)) {
+      console.log('[WS] item:created ignored (already in currentSession):', item.id);
+      return;
+    }
+
     // Игнорируем если элемент уже был добавлен локально (предотвращение дубликатов)
     if (addedItems.has(item.id)) {
       console.log('[WS] item:created ignored (already added locally):', item.id);
