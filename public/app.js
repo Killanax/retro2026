@@ -5076,6 +5076,9 @@ function renderDiscussionTab() {
     initDiscussionResize();
     recalculatePlanWidths();
   }, 100);
+
+  // Восстанавливаем размеры мемов после рендера обсуждения
+  setTimeout(() => restoreMemeSizes(), 50);
 }
 
 // Инициализация изменения размера панелей обсуждения
