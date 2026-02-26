@@ -1525,6 +1525,10 @@ async function loadSessionData() {
       if (a.category !== b.category) return a.category.localeCompare(b.category);
       return (a.order || 0) - (b.order || 0);
     });
+    
+    // Заполняем addedItems чтобы предотвратить дублирование от WebSocket
+    items.forEach(item => addedItems.add(item.id));
+    
     items.forEach(item => addItemToColumn(item));
 
     // Применяем настройки отображения после загрузки всех карточек
