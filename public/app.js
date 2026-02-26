@@ -10,6 +10,7 @@ let timerSeconds = 0;
 let timerRunning = false;
 let joinSent = false; // Флаг для предотвращения дублирования join
 let addedItems = new Set(); // Set для отслеживания добавленных элементов (предотвращение дубликатов)
+let isSessionLoading = false; // Флаг загрузки сессии
 
 // Сохранённая позиция курсора для contenteditable
 let savedSelection = null;
@@ -392,7 +393,13 @@ function initSocket() {
       console.log('[WS] item:created ignored - currentSession is null');
       return;
     }
-    
+
+    // Игнорируем если сессия ещё загружается (предотвращение дубликатов)
+    if (isSessionLoading) {
+      console.log('[WS] item:created ignored (session loading):', item.id);
+      return;
+    }
+
     // Игнорируем если элемент уже был добавлен локально (предотвращение дубликатов)
     if (addedItems.has(item.id)) {
       console.log('[WS] item:created ignored (already added locally):', item.id);
@@ -1399,6 +1406,9 @@ async function loadSession(sessionId) {
 async function loadSessionData() {
   if (!currentSession) return;
 
+  // Устанавливаем флаг загрузки
+  isSessionLoading = true;
+
   // Очищаем Set добавленных элементов при загрузке новой сессии
   addedItems.clear();
 
@@ -1546,6 +1556,10 @@ async function loadSessionData() {
       renderDiscussionTab();
       // startActionPlanAutoSave вызывается внутри renderDiscussionTab
     }
+    
+    // Сбрасываем флаг загрузки
+    isSessionLoading = false;
+    console.log('[LoadSession] Completed, addedItems:', addedItems.size);
   } catch (error) {
     console.error('Error loading items:', error);
   }
