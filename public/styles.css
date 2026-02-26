@@ -426,6 +426,10 @@ body {
   margin: 6px 0;
   max-height: 300px;
   object-fit: contain;
+  resize: both;
+  overflow: auto;
+  min-width: 100px;
+  min-height: 100px;
 }
 
 .retro-item-emoji {
