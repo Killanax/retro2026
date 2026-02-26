@@ -1527,6 +1527,9 @@ async function loadSessionData() {
     });
     items.forEach(item => addItemToColumn(item));
 
+    // Восстанавливаем размеры мемов
+    restoreMemeSizes();
+
     // Применяем настройки отображения после загрузки всех карточек
     applyViewSettings();
     
@@ -3215,6 +3218,76 @@ function initDraggable(element) {
   element.addEventListener('dragover', handleItemDragOver);
   element.addEventListener('dragleave', handleItemDragLeave);
   element.addEventListener('drop', handleItemDrop);
+
+  // Инициализация обработки двойного клика на мемах
+  initMemeResize(element);
+}
+
+// Инициализация изменения размера мемов по двойному клику
+function initMemeResize(element) {
+  const memes = element.querySelectorAll('.retro-item-meme');
+  memes.forEach(meme => {
+    meme.addEventListener('dblclick', function(e) {
+      e.stopPropagation();
+      
+      // Если уже в режиме редактирования - выключаем
+      if (this.classList.contains('editing')) {
+        this.classList.remove('editing');
+        this.style.width = '';
+        this.style.height = '';
+        saveMemeSize(this);
+      } else {
+        // Включаем режим редактирования
+        document.querySelectorAll('.retro-item-meme.editing').forEach(m => {
+          m.classList.remove('editing');
+          saveMemeSize(m);
+        });
+        this.classList.add('editing');
+      }
+    });
+
+    // Сохраняем размер при изменении
+    meme.addEventListener('resize', function(e) {
+      e.stopPropagation();
+    });
+  });
+
+  // Клик вне мема выключает режим редактирования
+  element.addEventListener('click', function(e) {
+    if (!e.target.classList.contains('retro-item-meme')) {
+      document.querySelectorAll('.retro-item-meme.editing').forEach(m => {
+        m.classList.remove('editing');
+        saveMemeSize(m);
+      });
+    }
+  });
+}
+
+// Сохранение размера мема в localStorage
+function saveMemeSize(memeElement) {
+  const itemId = memeElement.closest('.retro-item')?.dataset.id;
+  if (!itemId) return;
+
+  const width = memeElement.style.width || '';
+  const height = memeElement.style.height || '';
+
+  if (width || height) {
+    const savedSizes = JSON.parse(localStorage.getItem('memeSizes') || '{}');
+    savedSizes[itemId] = { width, height };
+    localStorage.setItem('memeSizes', JSON.stringify(savedSizes));
+  }
+}
+
+// Восстановление размера мема из localStorage
+function restoreMemeSizes() {
+  const savedSizes = JSON.parse(localStorage.getItem('memeSizes') || '{}');
+  Object.entries(savedSizes).forEach(([itemId, size]) => {
+    const meme = document.querySelector(`.retro-item[data-id="${itemId}"] .retro-item-meme`);
+    if (meme && size.width && size.height) {
+      meme.style.width = size.width;
+      meme.style.height = size.height;
+    }
+  });
 }
 
 function handleDragStart(e) {
