@@ -2401,12 +2401,30 @@ function getCategoryName(category) {
 
 // Форматирование текста плана действий
 function formatActionPlan(itemId, command, value = null) {
-  document.execCommand(command, false, value);
   const editor = document.querySelector(`.action-plan-editor[data-item-id="${itemId}"]`);
-  if (editor) {
-    editor.focus();
-    saveActionPlan(itemId, 'text');
+  if (!editor) return;
+  
+  // Сохраняем выделение перед форматированием
+  const selection = window.getSelection();
+  let range = null;
+  if (selection.rangeCount > 0) {
+    range = selection.getRangeAt(0);
   }
+  
+  // Фокусируемся на редакторе
+  editor.focus();
+  
+  // Восстанавливаем выделение если было
+  if (range) {
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  
+  // Выполняем команду форматирования
+  document.execCommand(command, false, value);
+  
+  // Сохраняем план действий
+  saveActionPlan(itemId, 'text');
 }
 
 // Сброс форматирования плана действий
@@ -4163,7 +4181,8 @@ async function splitSelectedParts(itemId, item, parts, selectedIndices) {
 
 // Обновление элемента
 function updateItemInColumn(item) {
-  const element = document.getElementById(`item-${item.id}`);
+  // Ищем элемент только в Brain storm (в колонках), игнорируя Discussion
+  const element = document.querySelector(`#columns-container #item-${item.id}`);
   console.log('[UI] updateItemInColumn:', { id: item.id, category: item.category, elementExists: !!element, order: item.order });
 
   // Если элемента нет в DOM - создаём его в правильной колонке
@@ -5914,50 +5933,58 @@ async function exportResults(format) {
       // Сортируем по порядку
       discussionItems.sort((a, b) => (a.order || 0) - (b.order || 0));
 
+      // Добавляем стили для двухколоночного макета обсуждения
+      html += `      <style>
+        .discussion-item-container { display: flex; gap: 20px; margin-bottom: 20px; align-items: flex-start; }
+        .discussion-card-left { flex: 1; min-width: 0; }
+        .discussion-plan-right { flex: 0 0 350px; background: #f0f2ff; border: 1px solid #6366f1; border-radius: 6px; padding: 15px; }
+        .discussion-plan-header { color: #6366f1; font-weight: bold; margin-bottom: 10px; font-size: 14px; }
+      </style>
+`;
+
       discussionItems.forEach(item => {
         const categoryClass = `template-${templateName}-${item.category}`;
         const template_col = template.columns.find(c => c.category === item.category);
         const categoryName = template_col ? template_col.name : item.category;
 
-        html += `      <div class="card discussion-card ${categoryClass}">
-`;
+        html += `      <div class="discussion-item-container">\n`;
+        
+        // Левая колонка - карточка
+        html += `        <div class="discussion-card-left">\n`;
+        html += `          <div class="card discussion-card ${categoryClass}">\n`;
 
         // Заголовок категории
-        html += `        <div style="background: #f59e0b; color: white; padding: 8px 12px; border-radius: 6px 6px 0 0; margin: -12px -12px 12px -12px; font-weight: bold; text-align: center;">
+        html += `            <div style="background: #f59e0b; color: white; padding: 8px 12px; border-radius: 6px 6px 0 0; margin: -12px -12px 12px -12px; font-weight: bold; text-align: center;">
           ${escapeHtml(categoryName)}
-        </div>
-`;
+        </div>\n`;
 
         // Автор и дата
-        html += `        <div style="font-size: 0.75rem; color: #666; margin-bottom: 8px;">
+        html += `            <div style="font-size: 0.75rem; color: #666; margin-bottom: 8px;">
           <span style="display: flex; align-items: center; gap: 4px;">
             <span style="font-weight: bold;">👤 ${escapeHtml(item.author)}</span>
           </span>
           <span style="color: #999; margin-left: 10px;">📅 ${new Date(item.created_at).toLocaleString()}</span>
-        </div>
-`;
+        </div>\n`;
 
         // Содержимое карточки
-        html += `        <div class="card-content">
-`;
+        html += `            <div class="card-content">\n`;
         if (item.meme_url) {
-          html += `          <img src="${escapeHtml(item.meme_url)}" alt="Meme" class="card-meme">\n`;
+          html += `              <img src="${escapeHtml(item.meme_url)}" alt="Meme" class="card-meme">\n`;
         } else if (item.text) {
           const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
           if (markdownMemeMatch) {
-            html += `          <img src="${escapeHtml(markdownMemeMatch[2])}" alt="${escapeHtml(markdownMemeMatch[1])}" class="card-meme">\n`;
+            html += `              <img src="${escapeHtml(markdownMemeMatch[2])}" alt="${escapeHtml(markdownMemeMatch[1])}" class="card-meme">\n`;
             const remainingText = item.text.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
             if (remainingText) {
-              html += `          <div style="margin-top: 8px;">${escapeHtml(remainingText)}</div>\n`;
+              html += `              <div style="margin-top: 8px;">${escapeHtml(remainingText)}</div>\n`;
             }
           } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
-            html += `          <div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
+            html += `              <div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
           } else {
-            html += `          <div>${escapeHtml(item.text)}</div>\n`;
+            html += `              <div>${escapeHtml(item.text)}</div>\n`;
           }
         }
-        html += `        </div>
-`;
+        html += `            </div>\n`;
 
         // Реакции
         if (item.reactions) {
@@ -5969,11 +5996,11 @@ async function exportResults(format) {
           };
           const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
           if (activeReactions.length > 0) {
-            html += `        <div class="reactions">\n`;
+            html += `            <div class="reactions">\n`;
             activeReactions.forEach(([name, count]) => {
-              html += `          <span class="reaction">${emojiMap[name] || name} ${count}</span>\n`;
+              html += `              <span class="reaction">${emojiMap[name] || name} ${count}</span>\n`;
             });
-            html += `        </div>\n`;
+            html += `            </div>\n`;
           }
         }
 
@@ -5983,29 +6010,31 @@ async function exportResults(format) {
             JSON.parse(item.vote_mode_votes).length :
             (Array.isArray(item.vote_mode_votes) ? item.vote_mode_votes.length : 0);
           if (voteCount > 0) {
-            html += `        <div class="reactions">\n`;
-            html += `          <span class="vote-reaction"><span class="icon">👍</span> ${voteCount}</span>\n`;
-            html += `        </div>\n`;
+            html += `            <div class="reactions">\n`;
+            html += `              <span class="vote-reaction"><span class="icon">👍</span> ${voteCount}</span>\n`;
+            html += `            </div>\n`;
           }
         }
 
-        // План действий (только в Обсуждении)
+        html += `          </div>\n`;
+        html += `        </div>\n`;
+        
+        // Правая колонка - План действий
         if (item.action_plan_text || item.action_plan_who || item.action_plan_when) {
-          html += `        <div class="action-plan">
-          <div class="action-plan-header">📋 План действий</div>
-`;
+          html += `        <div class="discussion-plan-right">\n`;
+          html += `          <div class="discussion-plan-header">📋 План действий</div>\n`;
           if (item.action_plan_text) {
-            html += `            <div style="margin-bottom: 8px;"><strong>Текст:</strong> ${item.action_plan_text}</div>\n`;
+            html += `            <div style="margin-bottom: 10px; font-size: 14px;"><strong>Текст:</strong><br>${item.action_plan_text}</div>\n`;
           }
           if (item.action_plan_who) {
-            html += `            <div style="margin-bottom: 8px;"><strong>👤 Кому:</strong> ${escapeHtml(item.action_plan_who)}</div>\n`;
+            html += `            <div style="margin-bottom: 10px; font-size: 14px;"><strong>👤 Кому:</strong> ${escapeHtml(item.action_plan_who)}</div>\n`;
           }
           if (item.action_plan_when) {
-            html += `            <div><strong>📅 Когда:</strong> ${escapeHtml(item.action_plan_when)}</div>\n`;
+            html += `            <div style="font-size: 14px;"><strong>📅 Когда:</strong> ${escapeHtml(item.action_plan_when)}</div>\n`;
           }
           html += `        </div>\n`;
         }
-
+        
         html += `      </div>\n`;
       });
 
