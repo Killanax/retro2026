@@ -1215,6 +1215,15 @@ async function returnToSession(sessionId) {
     participants.clear();
     addedItems.clear();
 
+    // Очищаем DOM от карточек предыдущей сессии
+    document.querySelectorAll('.column-items').forEach(col => {
+      col.innerHTML = '';
+    });
+    const discussionContainer = document.getElementById('discussion-items-container');
+    if (discussionContainer) {
+      discussionContainer.innerHTML = '';
+    }
+
     // Всегда устанавливаем currentSession
     currentSession = session;
 
