@@ -2935,6 +2935,105 @@ function createItemHtml(item) {
   `;
 }
 
+// Создание HTML для карточки в обсуждении (без ID чтобы избежать дубликатов)
+function createDiscussionItemHtml(item) {
+  const author = item.author || 'Аноним';
+
+  // Безопасный парсинг reactions
+  let reactions = {};
+  try {
+    reactions = item.reactions ? (typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions) : {};
+  } catch (e) {
+    console.warn('[UI] Failed to parse reactions for item:', item.id, e);
+  }
+
+  let userReactionsData = {};
+  try {
+    userReactionsData = item.user_reactions ? (typeof item.user_reactions === 'string' ? JSON.parse(item.user_reactions) : item.user_reactions) : {};
+  } catch (e) {
+    console.warn('[UI] Failed to parse user_reactions for item:', item.id, e);
+  }
+
+  let content = '';
+  if (item.type === 'meme' || (item.text && /!\[(.*?)\]\((.*?)\)/g.test(item.text))) {
+    const hasMarkdownImages = /!\[(.*?)\]\((.*?)\)/g.test(item.text || '');
+
+    if (hasMarkdownImages) {
+      let processedText = escapeHtml(item.text || '');
+      const parts = processedText.split(/(!\[.*?\]\(.*?\))/g);
+      content = '<div class="retro-item-mixed-content">';
+      parts.forEach(part => {
+        const imgMatch = part.match(/!\[(.*?)\]\((.*?)\)/);
+        if (imgMatch) {
+          content += `<img src="${imgMatch[2]}" alt="${imgMatch[1]}" class="retro-item-meme">`;
+        } else {
+          const textPart = part
+            .replace(/─────────────/g, '<hr class="item-divider">')
+            .replace(/\n/g, '<br>');
+          if (textPart.trim()) {
+            content += `<p class="retro-item-text">${textPart}</p>`;
+          }
+        }
+      });
+      content += '</div>';
+    } else if (item.type === 'meme') {
+      let memeUrl = item.meme_url || item.text || '';
+      content = `<img src="${memeUrl}" alt="Meme" class="retro-item-meme" onerror="this.style.display='none'">`;
+    }
+  } else if (item.type === 'emoji') {
+    content = `<div class="retro-item-emoji">${item.text}</div>`;
+  } else {
+    let processedText = escapeHtml(item.text);
+    const textClass = 'retro-item-text';
+    const textWithBreaks = processedText.replace(/\n/g, '<br>');
+    content = `<p class="${textClass}">${textWithBreaks}</p>`;
+  }
+
+  const activeReactions = TELEGRAM_EMOJIS.filter(({ name }) => (reactions[name] || 0) > 0);
+  const userReaction = userReactionsData[currentUserId];
+
+  let reactionsHtml = '<div class="reactions-container">';
+  activeReactions.forEach(({ emoji, name }) => {
+    const count = reactions[name] || 0;
+    const isUserReaction = userReaction === name;
+    reactionsHtml += `
+      <button class="reaction-btn ${name} ${isUserReaction ? 'active' : ''}"
+              onclick="toggleReaction('${item.id}', '${emoji}', '${name}')">
+        <span>${emoji}</span>
+        <span class="reaction-count">${count}</span>
+      </button>
+    `;
+  });
+
+  reactionsHtml += '</div>';
+
+  const isMerged = item.text && item.text.includes('─────────────');
+  const mergedBadge = isMerged ? `<span class="merged-badge" title="Объединённая карточка"><span class="material-icons" style="font-size: 12px;">call_merge</span></span>` : '';
+
+  return `
+    <div class="retro-item discussion-item-only" data-id="${item.id}" data-order="${item.order || 0}" data-category="${item.category || ''}">
+      <div class="retro-item-header">
+        <div class="category-badge-full" title="Категория: ${escapeHtml(item.category || '')}">
+          <span class="material-icons" style="font-size: 24px;">label</span>
+          <strong style="font-size: 18px;">${getCategoryName(item.category)}</strong>
+        </div>
+        <span class="retro-item-author">
+          <span class="material-icons" style="font-size: 14px;">person</span>
+          ${escapeHtml(author)}
+        </span>
+        <div style="display: flex; align-items: center; gap: 4px;">
+          ${mergedBadge}
+          <small class="text-muted">${new Date(item.created_at).toLocaleString()}</small>
+        </div>
+      </div>
+      ${content}
+      <div class="retro-item-footer">
+        ${reactionsHtml}
+      </div>
+    </div>
+  `;
+}
+
 // Переключение dropdown смайлов
 function toggleEmojiDropdown(event, itemId) {
   event.stopPropagation();
@@ -4665,8 +4764,8 @@ function renderDiscussionTab() {
   // Создаём обёртку для каждой карточки с планом действий справа
   container.innerHTML = discussionItems.map(item => `
     <div class="discussion-item-wrapper" data-item-id="${item.id}">
-      <div class="discussion-item-card">
-        ${createItemHtml(item)}
+      <div class="discussion-item-card" data-item-id="${item.id}">
+        ${createDiscussionItemHtml(item)}
       </div>
       <div class="discussion-item-plan">
         <div class="action-plan-section">
