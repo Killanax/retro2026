@@ -5937,8 +5937,9 @@ async function exportResults(format) {
       html += `      <style>
         .discussion-item-container { display: flex; gap: 20px; margin-bottom: 20px; align-items: flex-start; }
         .discussion-card-left { flex: 0 0 40%; max-width: 40%; }
-        .discussion-plan-right { flex: 1; background: #f0f2ff; border: 1px solid #6366f1; border-radius: 6px; padding: 15px; }
-        .discussion-plan-header { color: #6366f1; font-weight: bold; margin-bottom: 10px; font-size: 14px; }
+        .discussion-plan-right { flex: 1; background: #f0f2ff; border: 1px solid #6366f1; border-radius: 6px; padding: 15px; margin-top: 0; }
+        .discussion-plan-header { color: #6366f1; font-weight: bold; margin-bottom: 10px; font-size: 14px; margin-top: 0; }
+        .discussion-card-left .card { margin-top: 0; }
       </style>
 `;
 
