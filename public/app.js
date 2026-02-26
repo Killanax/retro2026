@@ -126,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
   restoreSession().then(restored => {
     // Проверяем наличие активной сессии и показываем кнопку "Вернуться в сессию"
     checkActiveSession();
-    
+
     // Если не восстановили, проверяем URL
     if (!restored) {
       checkUrlForSession();
@@ -134,14 +134,74 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+// Проверка наличия активной сессии и отображение кнопок "Вернуться в сессию"
+async function checkActiveSession() {
+  const saved = localStorage.getItem('retroSession');
+  const noticeDiv = document.getElementById('active-session-notice');
+
+  console.log('[checkActiveSession] localStorage:', saved);
+
+  // Проверяем, является ли пользователь админом (по флагу или по сохранённым именам)
+  const isAdmin = localStorage.getItem('isAdmin') === 'true';
+  const adminNames = JSON.parse(localStorage.getItem('retroAdminNames') || '[]');
+
+  if (isAdmin || adminNames.length > 0) {
+    // Загружаем все сессии и ищем активные
+    try {
+      const response = await fetch('/api/sessions');
+      const sessions = await response.json();
+
+      // Ищем активные сессии
+      const activeSessions = sessions.filter(s => s.status === 'active');
+
+      if (activeSessions.length > 0) {
+        // Показываем кнопки для всех активных сессий
+        if (noticeDiv) {
+          noticeDiv.style.display = 'block';
+          const buttonsHtml = activeSessions.map(s => `
+            <button class="btn btn-sm btn-primary" onclick="returnToSession('${s.id}')" style="margin-left: 10px; margin-right: 10px; margin-top: 5px; margin-bottom: 5px;">
+              <span class="material-icons" style="font-size: 16px;">login</span>
+              ${escapeHtml(s.name)} (${s.id})
+            </button>
+          `).join('');
+          noticeDiv.innerHTML = `
+            <div class="alert alert-info mb-0" style="display: inline-block; margin-left: auto; text-align: center;">
+              <div style="margin-bottom: 5px;">
+                <span class="material-icons me-2 align-middle">info</span>
+                Активные сессии
+              </div>
+              <div>${buttonsHtml}</div>
+            </div>
+          `;
+        }
+        console.log('[checkActiveSession] showing return buttons for sessions:', activeSessions.map(s => s.id));
+
+        // Разблокируем вкладку "Создать" для админа
+        unlockCreateTab();
+        return;
+      }
+    } catch (err) {
+      console.error('Error checking active sessions:', err);
+    }
+  }
+
+  // Скрываем кнопки если нет активной сессии или пользователь не админ
+  if (noticeDiv) {
+    noticeDiv.style.display = 'none';
+    noticeDiv.innerHTML = '';
+  }
+}
+
 // Настройка пароля на вкладку создания
 const CREATE_TAB_PASSWORD = 'yurassss';
 let createTabUnlocked = false;
 
 function setupCreateTabPassword() {
-  // Проверяем, разблокирована ли вкладка в sessionStorage
+  // Проверяем, разблокирована ли вкладка в sessionStorage или localStorage
   const unlocked = sessionStorage.getItem('createTabUnlocked');
-  if (unlocked === 'true') {
+  const isAdmin = localStorage.getItem('isAdmin');
+  
+  if (unlocked === 'true' || isAdmin === 'true') {
     unlockCreateTab();
   } else {
     // Если не разблокирована, переключаем на вкладку "Присоединиться"
@@ -187,29 +247,31 @@ function showPasswordModal() {
 
 function checkPassword() {
   const password = document.getElementById('create-tab-password').value;
-  
+
   if (password === CREATE_TAB_PASSWORD) {
     unlockCreateTab();
     sessionStorage.setItem('createTabUnlocked', 'true');
-    
+    // Сохраняем флаг админа в localStorage
+    localStorage.setItem('isAdmin', 'true');
+
     // Закрываем модальное окно
     const modalEl = document.getElementById('passwordModal');
     const modal = bootstrap.Modal.getInstance(modalEl);
     if (modal) {
       modal.hide();
     }
-    
+
     // Очищаем поле пароля
     document.getElementById('create-tab-password').value = '';
-    
+
     // Переключаем на вкладку создания
     const createTab = document.querySelector('[data-bs-target="#create-tab"]');
     if (createTab) {
       const tab = new bootstrap.Tab(createTab);
       tab.show();
     }
-    
-    showToast('Доступ разрешён', 'success');
+
+    showToast('Доступ разрешён. Вы администратор.', 'success');
   } else {
     showToast('Неверный пароль', 'danger');
     document.getElementById('create-tab-password').value = '';
@@ -220,11 +282,12 @@ function checkPassword() {
 function unlockCreateTab() {
   const locked = document.getElementById('create-tab-locked');
   const unlocked = document.getElementById('create-tab-unlocked');
-  
+
   if (locked && unlocked) {
     locked.style.display = 'none';
     unlocked.style.display = 'block';
     createTabUnlocked = true;
+    localStorage.setItem('isAdmin', 'true');
   }
 }
 
@@ -237,6 +300,7 @@ function lockCreateTab() {
     unlocked.style.display = 'none';
     createTabUnlocked = false;
     sessionStorage.removeItem('createTabUnlocked');
+    localStorage.removeItem('isAdmin');
 
     // Переключаем на вкладку "Присоединиться"
     const joinTab = document.querySelector('[data-bs-target="#join-tab"]');
@@ -245,31 +309,6 @@ function lockCreateTab() {
       tab.show();
     }
   }
-}
-
-// Проверка наличия активной сессии и отображение кнопки "Вернуться в сессию"
-function checkActiveSession() {
-  const saved = localStorage.getItem('retroSession');
-  const noticeDiv = document.getElementById('active-session-notice');
-  const returnBtn = document.getElementById('return-session-btn');
-  
-  if (saved) {
-    try {
-      const data = JSON.parse(saved);
-      if (data.isAdmin && data.session) {
-        // Показываем кнопку возврата в сессию
-        if (noticeDiv) noticeDiv.style.display = 'block';
-        if (returnBtn) returnBtn.style.display = 'inline-block';
-        return;
-      }
-    } catch (e) {
-      console.error('Error checking active session:', e);
-    }
-  }
-  
-  // Скрываем кнопку если нет активной сессии
-  if (noticeDiv) noticeDiv.style.display = 'none';
-  if (returnBtn) returnBtn.style.display = 'none';
 }
 
 // Список имён для авто-входа
@@ -498,11 +537,25 @@ function initSocket() {
       removeItemFromColumn(data.id);
     }
   });
-  
+
+  socket.on('category:deleted', (data) => {
+    console.log('[WS] category:deleted received:', { category: data.category });
+    if (currentSession) {
+      // Удаляем все карточки этой категории из currentSession.items
+      if (currentSession?.items) {
+        currentSession.items = currentSession.items.filter(i => i.category !== data.category);
+      }
+      // Перерисовываем колонки
+      renderColumns();
+      showToast('Колонка удалена', 'info');
+    }
+  });
+
   socket.on('session:ended', (data) => {
     showToast('Сессия завершена!', 'success');
+    // Очищаем localStorage после завершения сессии
     localStorage.removeItem('retroSession');
-    setTimeout(() => goHome(), 2000);
+    setTimeout(() => goHome(true), 2000);
   });
 
   // Настройки отображения от админа
@@ -767,7 +820,49 @@ function initSocket() {
         columnHeaders[col.category] = col.name;
       });
       currentSession.column_headers = JSON.stringify(columnHeaders);
+      
+      // Обновляем customColumns - это критически важно для синхронизации
+      const standardCategories = ['start', 'stop', 'continue', 'mad', 'sad', 'glad', 'good', 'bad', 'ideas', 'keep', 'improve', 'wind', 'anchor', 'rocks', 'island', 'general'];
+      currentSession.customColumns = data.columns
+        .filter(col => !standardCategories.includes(col.category))
+        .map(col => ({
+          id: col.id || col.category,
+          name: col.name,
+          category: col.category
+        }));
+      
+      // Перерисовываем колонки и добавляем карточки
       renderColumns();
+      renderColumnsForBrainstorm();
+    }
+  });
+
+  // Обработчик удаления колонки
+  socket.on('column:deleted', (data) => {
+    console.log('[WS] Column deleted:', data);
+    if (currentSession) {
+      // Удаляем колонку из customColumns
+      if (currentSession.customColumns) {
+        currentSession.customColumns = currentSession.customColumns.filter(col => col.category !== data.category);
+      }
+      
+      // Удаляем из column_headers
+      if (currentSession.column_headers) {
+        const columnHeaders = JSON.parse(currentSession.column_headers);
+        delete columnHeaders[data.category];
+        currentSession.column_headers = JSON.stringify(columnHeaders);
+      }
+      
+      // Удаляем карточки этой категории из items
+      if (currentSession.items) {
+        currentSession.items = currentSession.items.filter(item => item.category !== data.category);
+      }
+      
+      // Перерисовываем колонки и добавляем карточки
+      renderColumns();
+      renderColumnsForBrainstorm();
+      
+      showToast('Колонка удалена', 'info');
     }
   });
 
@@ -970,12 +1065,29 @@ async function restoreSession() {
   if (saved) {
     try {
       const data = JSON.parse(saved);
+
       currentSession = data.session;
       currentUserId = data.userId;
       isAdmin = data.isAdmin;
       // Восстанавливаем флаги голосования и завершения сессии
       sessionEnded = data.sessionEnded || false;
       votingStarted = data.votingStarted || false;
+
+      // Проверяем статус сессии через API
+      try {
+        const response = await fetch(`/api/sessions/${data.session.id}/status`);
+        const statusData = await response.json();
+
+        // Если сессия завершена на сервере - не восстанавливаем
+        if (statusData.status !== 'active') {
+          console.log('[WS] Session is not active (status:', statusData.status + '), not restoring');
+          localStorage.removeItem('retroSession');
+          return false;
+        }
+      } catch (err) {
+        console.error('Error checking session status during restore:', err);
+      }
+
       console.log('[WS] Restored session from localStorage:', { sessionId: currentSession.id, userId: currentUserId, isAdmin, sessionEnded, socketConnected: socket?.connected });
 
       showSessionPage();
@@ -1002,35 +1114,11 @@ async function restoreSession() {
 
       // Восстанавливаем последнюю активную вкладку
       const savedTab = localStorage.getItem(`retroSessionTab_${currentSession.id}`);
-      if (savedTab) {
-        // Если сессия завершена, показываем вкладки
-        if (sessionEnded) {
-          document.getElementById('session-tabs').style.display = 'flex';
-          switchToTab(savedTab);
-        } else {
-          // Если сессия не завершена, но была выбрана вкладка обсуждения, 
-          // возможно, пользователь был в режиме просмотра или админ перешёл в обсуждение
-          // Проверяем, есть ли у нас права на просмотр обсуждения
-          if (savedTab === 'discussion') {
-            // Показываем вкладки даже если сессия не завершена, чтобы пользователь мог переключиться
-            document.getElementById('session-tabs').style.display = 'flex';
-            switchToTab(savedTab);
-          } else {
-            // Для обычной сессии показываем вкладки, но переключаем на brain storm
-            document.getElementById('session-tabs').style.display = 'flex';
-            switchToTab('brainstorm');
-          }
-        }
-      } else {
-        // Если нет сохраненной вкладки, по умолчанию brain storm
-        if (sessionEnded) {
-          document.getElementById('session-tabs').style.display = 'flex';
-          switchToTab('brainstorm');
-        } else {
-          // Скрываем вкладки если сессия не завершена и нет сохраненной вкладки
-          document.getElementById('session-tabs').style.display = 'none';
-        }
-      }
+      const tabToRestore = savedTab || 'brainstorm';
+
+      // Показываем вкладки всегда (и для активных, и для завершённых сессий)
+      document.getElementById('session-tabs').style.display = 'flex';
+      switchToTab(tabToRestore);
 
       // Если это админ, скрываем вкладку "Создать"
       if (isAdmin) {
@@ -1059,6 +1147,16 @@ function saveSession() {
       sessionEnded,
       votingStarted
     }));
+    
+    // Сохраняем список всех имён админа для проверки прав в истории
+    if (isAdmin && currentSession.admin_name) {
+      const adminNames = JSON.parse(localStorage.getItem('retroAdminNames') || '[]');
+      if (!adminNames.includes(currentSession.admin_name)) {
+        adminNames.push(currentSession.admin_name);
+        localStorage.setItem('retroAdminNames', JSON.stringify(adminNames));
+      }
+    }
+    
     // Также сохраняем в URL
     const url = new URL(window.location);
     url.searchParams.set('session', currentSession.id);
@@ -1067,43 +1165,117 @@ function saveSession() {
 }
 
 // Вернуться в активную сессию (для админа)
-function returnToSession() {
-  const saved = localStorage.getItem('retroSession');
-  if (saved) {
-    try {
-      const data = JSON.parse(saved);
-      if (data.isAdmin && data.session) {
-        currentSession = data.session;
-        currentUserId = data.userId;
-        isAdmin = data.isAdmin;
-        console.log('[WS] Returning to session from main menu:', { sessionId: currentSession.id, userId: currentUserId, isAdmin });
-        
-        showSessionPage();
-        
-        // Ждём подключения WebSocket
-        if (!socket?.connected) {
-          socket.once('connect', () => {
-            sendJoinToSession(currentSession.id);
-            loadSessionData();
-          });
-        } else {
-          sendJoinToSession(currentSession.id);
-          loadSessionData();
+// Возврат в сессию по ID
+async function returnToSession(sessionId) {
+  // Если ID не передан, пробуем восстановить из localStorage
+  if (!sessionId) {
+    const saved = localStorage.getItem('retroSession');
+    if (saved) {
+      try {
+        const data = JSON.parse(saved);
+        // Восстанавливаем сессию если пользователь админ и сессия существует
+        if (data.isAdmin && data.session) {
+          sessionId = data.session.id;
         }
+      } catch (e) {
+        console.error('Error parsing saved session:', e);
       }
-    } catch (e) {
-      console.error('Error returning to session:', e);
-      localStorage.removeItem('retroSession');
-      showToast('Не удалось восстановить сессию', 'danger');
     }
+  }
+
+  if (!sessionId) {
+    showToast('Нет активной сессии для возврата', 'warning');
+    return;
+  }
+
+  try {
+    // Проверяем статус сессии
+    const response = await fetch(`/api/sessions/${sessionId}/status`);
+    const statusData = await response.json();
+
+    // Если сессия завершена - не восстанавливаем
+    if (statusData.status !== 'active') {
+      console.log('[returnToSession] Cannot return to session: status is', statusData.status);
+      localStorage.removeItem('retroSession');
+      showToast('Сессия завершена', 'info');
+      checkActiveSession();
+      return;
+    }
+
+    // Загружаем данные сессии
+    const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
+    const session = await sessionResponse.json();
+
+    // Всегда устанавливаем currentSession
+    currentSession = session;
+
+    // Восстанавливаем сессию из localStorage если есть
+    const saved = localStorage.getItem('retroSession');
+    if (saved) {
+      try {
+        const data = JSON.parse(saved);
+        if (data.isAdmin && data.userId) {
+          currentUserId = data.userId;
+          isAdmin = data.isAdmin;
+        }
+      } catch (e) {
+        console.error('Error restoring session:', e);
+      }
+    }
+
+    // Если нет сохранённых данных, проверяем, является ли пользователь админом этой сессии
+    if (!currentUserId) {
+      // Проверяем, является ли текущий пользователь админом этой сессии
+      const adminNames = JSON.parse(localStorage.getItem('retroAdminNames') || '[]');
+      const isSessionAdmin = adminNames.includes(session.admin_name);
+
+      if (isSessionAdmin) {
+        // Восстанавливаем статус админа
+        isAdmin = true;
+        currentUserId = 'admin_' + session.admin_name;
+        // Сохраняем флаг админа
+        localStorage.setItem('isAdmin', 'true');
+        console.log('[returnToSession] Restored admin status from adminNames');
+      } else {
+        // Если не админ, заходим как обычный пользователь
+        isAdmin = false;
+        // Генерируем ID пользователя
+        const userName = prompt('Введите ваше имя для участия в сессии:', '') || 'Аноним';
+        currentUserId = 'user_' + userName;
+      }
+    }
+
+    console.log('[returnToSession] Returning to session:', { sessionId: currentSession.id, userId: currentUserId, isAdmin });
+
+    showSessionPage();
+
+    // Ждём подключения WebSocket
+    if (!socket?.connected) {
+      socket.once('connect', () => {
+        sendJoinToSession(currentSession.id);
+        loadSessionData();
+      });
+    } else {
+      sendJoinToSession(currentSession.id);
+      loadSessionData();
+    }
+  } catch (err) {
+    console.error('Error returning to session:', err);
+    showToast('Не удалось вернуться в сессию', 'danger');
   }
 }
 
 // Создание сессии
 async function createSession() {
   const name = document.getElementById('session-name').value;
-  const adminName = document.getElementById('admin-name').value;
+  let adminName = document.getElementById('admin-name').value;
   const template = document.getElementById('session-template').value;
+
+  // Если имя ведущего не введено, генерируем случайное
+  if (!adminName || adminName.trim() === '') {
+    adminName = RANDOM_NAMES[Math.floor(Math.random() * RANDOM_NAMES.length)];
+    document.getElementById('admin-name').value = adminName;
+  }
 
   try {
     const response = await fetch('/api/sessions', {
@@ -1222,12 +1394,32 @@ async function loadSessionData() {
     hideOthersCards = sessionData.hide_others_cards || false;
     hideOthersVotes = sessionData.hide_others_votes || false;
     
+    // Загружаем column_headers и инициализируем customColumns
+    if (sessionData.column_headers) {
+      const columnHeaders = JSON.parse(sessionData.column_headers);
+      // Инициализируем customColumns из column_headers (для кастомных колонок)
+      currentSession.column_headers = sessionData.column_headers;
+      currentSession.customColumns = currentSession.customColumns || [];
+      
+      // Для каждого заголовка, которого нет в стандартных шаблонах, создаём customColumn
+      const standardCategories = ['start', 'stop', 'continue', 'mad', 'sad', 'glad', 'good', 'bad', 'ideas', 'keep', 'improve', 'wind', 'anchor', 'rocks', 'island', 'general'];
+      Object.keys(columnHeaders).forEach(category => {
+        if (!standardCategories.includes(category) && !currentSession.customColumns.find(c => c.category === category)) {
+          currentSession.customColumns.push({
+            id: category,
+            name: columnHeaders[category],
+            category: category
+          });
+        }
+      });
+    }
+
     // Обновляем чекбоксы
     const hideCardsCheckbox = document.getElementById('hide-others-cards');
     const hideVotesCheckbox = document.getElementById('hide-others-votes');
     if (hideCardsCheckbox) hideCardsCheckbox.checked = hideOthersCards;
     if (hideVotesCheckbox) hideVotesCheckbox.checked = hideOthersVotes;
-    
+
     // Сохраняем в localStorage
     localStorage.setItem(`hideOthersCards_${currentSession.id}`, hideOthersCards);
     localStorage.setItem(`hideOthersVotes_${currentSession.id}`, hideOthersVotes);
@@ -1239,12 +1431,18 @@ async function loadSessionData() {
   const isAdm = isAdmin;
   document.getElementById('admin-panel-btn').style.display = isAdm ? 'block' : 'none';
   document.getElementById('end-session-btn').style.display = isAdm ? 'block' : 'none';
-  
+
   // Показываем контроль лимита голосов только админу
-  document.getElementById('admin-votes-control').style.display = isAdm ? 'block' : 'none';
+  document.getElementById('admin-vote-group').style.display = isAdm ? 'flex' : 'none';
   document.getElementById('vote-limit-display').style.display = isAdm ? 'none' : 'block';
   document.getElementById('vote-limit-input').value = voteLimit;
   document.getElementById('vote-limit-value').textContent = voteLimit;
+
+  // Показываем кнопку добавления колонки только админу
+  const addColumnBtn = document.getElementById('add-column-btn');
+  if (addColumnBtn) {
+    addColumnBtn.style.display = isAdm ? 'block' : 'none';
+  }
 
   renderColumns();
 
@@ -1274,34 +1472,30 @@ async function loadSessionData() {
 
     // Восстанавливаем сохраненную вкладку ДО рендера колонок
     const savedTab = localStorage.getItem(`retroSessionTab_${currentSession.id}`);
-    if (sessionEnded) {
-      // Показываем вкладки если сессия завершена
-      document.getElementById('session-tabs').style.display = 'flex';
+    
+    // Показываем вкладки всегда (и для активных, и для завершённых сессий)
+    document.getElementById('session-tabs').style.display = 'flex';
+    
+    // Определяем какую вкладку показать — устанавливаем currentTab ДО рендера
+    currentTab = savedTab || 'brainstorm';
 
-      // Определяем какую вкладку показать — устанавливаем currentTab ДО рендера
-      currentTab = savedTab || 'brainstorm';
-
-      if (currentTab === 'discussion') {
-        // Переключаем на вкладку обсуждения
-        document.getElementById('columns-container').style.display = 'none';
-        document.getElementById('columns-container').classList.add('d-none');
-        document.getElementById('discussion-container').style.display = '';
-        document.getElementById('discussion-container').classList.remove('d-none');
-        document.getElementById('brainstorm-tab-btn').classList.remove('active');
-        document.getElementById('discussion-tab-btn').classList.add('active');
-        // renderDiscussionTab вызывается позже, после загрузки items
-      } else {
-        // Вкладка brain storm - показываем колонки
-        document.getElementById('columns-container').style.display = '';
-        document.getElementById('columns-container').classList.remove('d-none');
-        document.getElementById('discussion-container').style.display = 'none';
-        document.getElementById('discussion-container').classList.add('d-none');
-        document.getElementById('brainstorm-tab-btn').classList.add('active');
-        document.getElementById('discussion-tab-btn').classList.remove('active');
-      }
+    if (currentTab === 'discussion') {
+      // Переключаем на вкладку обсуждения
+      document.getElementById('columns-container').style.display = 'none';
+      document.getElementById('columns-container').classList.add('d-none');
+      document.getElementById('discussion-container').style.display = '';
+      document.getElementById('discussion-container').classList.remove('d-none');
+      document.getElementById('brainstorm-tab-btn').classList.remove('active');
+      document.getElementById('discussion-tab-btn').classList.add('active');
+      // renderDiscussionTab вызывается позже, после загрузки items
     } else {
-      // Если сессия не завершена, по умолчанию brain storm
-      currentTab = 'brainstorm';
+      // Вкладка brain storm - показываем колонки
+      document.getElementById('columns-container').style.display = '';
+      document.getElementById('columns-container').classList.remove('d-none');
+      document.getElementById('discussion-container').style.display = 'none';
+      document.getElementById('discussion-container').classList.add('d-none');
+      document.getElementById('brainstorm-tab-btn').classList.add('active');
+      document.getElementById('discussion-tab-btn').classList.remove('active');
     }
 
     document.querySelectorAll('.column-items').forEach(col => col.innerHTML = '');
@@ -1398,7 +1592,7 @@ async function loadSessionData() {
   const adminViewControls = document.getElementById('admin-view-controls');
   const adminPanelBtn = document.getElementById('admin-panel-btn');
   const endSessionBtn = document.getElementById('end-session-btn');
-  const adminVotesControl = document.getElementById('admin-votes-control');
+  const adminVoteGroup = document.getElementById('admin-vote-group');
   const voteLimitDisplay = document.getElementById('vote-limit-display');
   const userDisplay = document.getElementById('user-display');
 
@@ -1406,7 +1600,7 @@ async function loadSessionData() {
     if (adminViewControls) adminViewControls.style.setProperty('display', 'flex', 'important');
     if (adminPanelBtn) adminPanelBtn.style.display = 'block';
     if (endSessionBtn) endSessionBtn.style.display = 'block';
-    if (adminVotesControl) adminVotesControl.style.display = 'block';
+    if (adminVoteGroup) adminVoteGroup.style.display = 'flex';
     if (voteLimitDisplay) voteLimitDisplay.style.display = 'none';
     // Скрываем имя у админа
     if (userDisplay) userDisplay.style.display = 'none';
@@ -1414,7 +1608,7 @@ async function loadSessionData() {
     if (adminViewControls) adminViewControls.style.display = 'none';
     if (adminPanelBtn) adminPanelBtn.style.display = 'none';
     if (endSessionBtn) endSessionBtn.style.display = 'none';
-    if (adminVotesControl) adminVotesControl.style.display = 'none';
+    if (adminVoteGroup) adminVoteGroup.style.display = 'none';
     if (voteLimitDisplay) voteLimitDisplay.style.display = 'block';
     // Показываем имя у обычного пользователя
     if (userDisplay) userDisplay.style.display = 'inline';
@@ -1466,7 +1660,22 @@ function renderColumns() {
   // Получаем кастомные заголовки из сессии
   const columnHeaders = currentSession.column_headers ? JSON.parse(currentSession.column_headers) : {};
 
-  container.innerHTML = template.columns.map((col, index) => {
+  // Объединяем стандартные колонки шаблона с пользовательскими
+  const allColumns = [...template.columns];
+  if (currentSession.customColumns) {
+    currentSession.customColumns.forEach(customCol => {
+      // Проверяем, нет ли уже такой колонки
+      if (!allColumns.find(c => c.category === customCol.category)) {
+        allColumns.push({
+          id: customCol.id,
+          name: customCol.name,
+          category: customCol.category
+        });
+      }
+    });
+  }
+
+  container.innerHTML = allColumns.map((col, index) => {
     // Используем кастомный заголовок или заголовок по умолчанию
     const columnHeader = columnHeaders[col.category] || col.name;
 
@@ -1492,6 +1701,12 @@ function renderColumns() {
         <span class="material-icons">edit</span>
       </button>` : '';
 
+    // Кнопка удаления для пользовательских колонок (только для админа)
+    const deleteButton = (col.id && col.id.startsWith('custom_')) && isAdmin ? `
+      <button class="btn-delete-column" onclick="deleteCustomColumn('${col.category}')" title="Удалить колонку">
+        <span class="material-icons">delete</span>
+      </button>` : '';
+
     return `
       <div class="retro-column column-${index + 1}" data-category="${col.category}" ${dragAttrs}>
         <div class="column-header">
@@ -1499,6 +1714,7 @@ function renderColumns() {
             <span class="material-icons">label</span>
             ${columnHeader}
             ${editButton}
+            ${deleteButton}
           </h5>
           <span class="column-badge" id="badge-${col.category}">0</span>
         </div>
@@ -4236,6 +4452,117 @@ function switchToTab(tabName) {
   }
 }
 
+// Добавление пользовательской колонки (для админа)
+function addCustomColumn() {
+  if (!currentSession || !isAdmin) return;
+
+  // Генерируем уникальный ID для колонки
+  const customColumnId = 'custom_' + Date.now();
+
+  // Добавляем колонку в customColumns
+  if (!currentSession.customColumns) {
+    currentSession.customColumns = [];
+  }
+  currentSession.customColumns.push({
+    id: customColumnId,
+    name: 'Дополнительно',
+    category: customColumnId
+  });
+
+  // Сохраняем в БД через column_headers
+  saveCustomColumnsToDB();
+
+  // Перерисовываем колонки и добавляем карточки
+  renderColumns();
+  renderColumnsForBrainstorm();
+
+  showToast('Колонка добавлена', 'success');
+}
+
+// Сохранение пользовательских колонок в БД
+async function saveCustomColumnsToDB() {
+  if (!currentSession) return;
+
+  try {
+    // Получаем существующие column_headers
+    let columnHeaders = {};
+    if (currentSession.column_headers) {
+      columnHeaders = JSON.parse(currentSession.column_headers);
+    }
+
+    // Добавляем заголовки из customColumns
+    if (currentSession.customColumns) {
+      currentSession.customColumns.forEach(col => {
+        columnHeaders[col.category] = col.name;
+      });
+    }
+
+    // Сохраняем в БД - передаём id для custom колонок
+    const response = await fetch(`/api/sessions/${currentSession.id}/columns`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        columns: Object.keys(columnHeaders).map(category => {
+          const customCol = currentSession.customColumns?.find(c => c.category === category);
+          return {
+            category,
+            name: columnHeaders[category],
+            id: customCol?.id || null
+          };
+        })
+      })
+    });
+
+    const result = await response.json();
+    if (result.success) {
+      // Обновляем column_headers в текущей сессии
+      currentSession.column_headers = JSON.stringify(columnHeaders);
+    }
+  } catch (error) {
+    console.error('Error saving custom columns:', error);
+  }
+}
+
+// Удаление пользовательской колонки (для админа)
+async function deleteCustomColumn(category) {
+  if (!currentSession || !isAdmin) return;
+  if (!confirm('Удалить эту колонку и все карточки в ней?')) return;
+
+  // Вызываем API для удаления колонки (оно отправит WebSocket событие всем клиентам)
+  try {
+    const response = await fetch(`/api/sessions/${currentSession.id}/columns/${category}`, {
+      method: 'DELETE'
+    });
+    
+    const result = await response.json();
+    if (result.success) {
+      // Обновляем локально column_headers
+      currentSession.column_headers = JSON.stringify(result.column_headers);
+      
+      // Удаляем колонку из customColumns
+      if (currentSession.customColumns) {
+        currentSession.customColumns = currentSession.customColumns.filter(col => col.category !== category);
+      }
+      
+      // Удаляем карточки этой категории из items
+      if (currentSession.items) {
+        currentSession.items = currentSession.items.filter(item => item.category !== category);
+      }
+      
+      // Перерисовываем колонки и добавляем карточки
+      renderColumns();
+      renderColumnsForBrainstorm();
+      
+      showToast('Колонка удалена', 'success');
+    } else {
+      showToast('Ошибка удаления колонки', 'danger');
+    }
+  } catch (error) {
+    console.error('Error deleting column:', error);
+    showToast('Ошибка удаления колонки', 'danger');
+  }
+}
+
 // Перерисовка колонок для Brain storm (без полей плана действий)
 function renderColumnsForBrainstorm() {
   if (!currentSession) return;
@@ -4346,7 +4673,6 @@ function renderDiscussionTab() {
           <div class="action-plan-header">
             <span class="material-icons" style="font-size: 16px;">assignment</span>
             <strong>План действий</strong>
-            <span class="category-badge" style="margin-left: auto;">${getCategoryName(item.category)}</span>
           </div>
           <div class="action-plan-toolbar" id="toolbar-${item.id}">
             <button class="toolbar-btn" type="button" onclick="formatActionPlan('${item.id}', 'bold')" title="Жирный">
@@ -4772,20 +5098,22 @@ function renderTimer() {
   const container = document.getElementById('timer-container');
   container.innerHTML = `
     <div class="timer-display ${timerRunning ? 'timer-running' : ''}" id="timer-display">
-      <span class="material-icons">timer</span>
       <span class="timer-time" id="timer-time">00:00</span>
+      <span class="material-icons">timer</span>
       ${isAdmin ? `
-        <div class="timer-controls">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="display: flex; gap: 2px;">
+            <button class="btn btn-sm btn-light" onclick="startTimer()" title="Запустить">
+              <span class="material-icons">play_arrow</span>
+            </button>
+            <button class="btn btn-sm btn-warning" onclick="stopTimer()" title="Пауза">
+              <span class="material-icons">pause</span>
+            </button>
+            <button class="btn btn-sm btn-danger" onclick="resetTimer()" title="Сброс">
+              <span class="material-icons">refresh</span>
+            </button>
+          </div>
           <input type="number" class="timer-input" id="timer-minutes" min="1" max="60" value="5" placeholder="Мин">
-          <button class="btn btn-sm btn-light" onclick="startTimer()" title="Запустить">
-            <span class="material-icons" style="font-size: 18px;">play_arrow</span>
-          </button>
-          <button class="btn btn-sm btn-warning" onclick="stopTimer()" title="Пауза">
-            <span class="material-icons" style="font-size: 18px;">pause</span>
-          </button>
-          <button class="btn btn-sm btn-danger" onclick="resetTimer()" title="Сброс">
-            <span class="material-icons" style="font-size: 18px;">refresh</span>
-          </button>
         </div>
       ` : ''}
     </div>
@@ -4867,10 +5195,9 @@ function updateParticipantsList() {
   }
   
   container.innerHTML = Array.from(participants.values()).map(p => `
-    <div class="participant-badge ${p.isAdmin ? 'admin' : ''}">
+    <div class="participant-badge">
       <div class="participant-avatar">${p.name.charAt(0).toUpperCase()}</div>
       ${escapeHtml(p.name)}
-      ${p.isAdmin ? '<span class="material-icons" style="font-size: 14px; color: #f59e0b;">verified</span>' : ''}
     </div>
   `).join('');
 }
@@ -4885,7 +5212,7 @@ function endSession() {
 async function confirmEndSession() {
   // Сохраняем все планы действий перед завершением
   await saveAllActionPlans();
-  
+
   try {
     await fetch(`/api/sessions/${currentSession.id}/end`, {
       method: 'POST',
@@ -4894,10 +5221,11 @@ async function confirmEndSession() {
     });
 
     bootstrap.Modal.getInstance(document.getElementById('endSessionModal')).hide();
+    // Очищаем localStorage после завершения сессии
     localStorage.removeItem('retroSession');
     showToast('Сессия завершена!', 'success');
 
-    setTimeout(() => goHome(), 2000);
+    setTimeout(() => goHome(true), 2000);
   } catch (error) {
     console.error('Error ending session:', error);
     showToast('Ошибка завершения сессии', 'danger');
@@ -4954,6 +5282,7 @@ async function quickEndSession(sessionId, sessionName) {
 
     showToast('Сессия завершена!', 'success');
     loadHistory(); // Обновляем список истории
+    checkActiveSession(); // Обновляем кнопки активных сессий
   } catch (error) {
     console.error('Error ending session:', error);
     showToast('Ошибка завершения сессии', 'danger');
@@ -4963,8 +5292,18 @@ async function quickEndSession(sessionId, sessionName) {
 // Экспорт результатов
 async function exportResults(format) {
   try {
-    const response = await fetch(`/api/sessions/${currentSession.id}/items`);
-    const items = await response.json();
+    const itemsResponse = await fetch(`/api/sessions/${currentSession.id}/items`);
+    let items = await itemsResponse.json();
+
+    // Загружаем голоса голосования
+    const votesResponse = await fetch(`/api/sessions/${currentSession.id}/votes`);
+    const votesData = await votesResponse.json();
+
+    // Добавляем vote_mode_votes к каждой карточке
+    items = items.map(item => ({
+      ...item,
+      vote_mode_votes: votesData[item.id] || []
+    }));
 
     const data = {
       session: currentSession,
@@ -4976,132 +5315,588 @@ async function exportResults(format) {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       downloadBlob(blob, `retro-${currentSession.id}.json`);
     } else if (format === 'pdf') {
-      // PDF экспорт - все карточки из Brain storm и Обсуждение
-      let text = `Ретроспектива: ${currentSession.name}\n`;
-      text += `ID: ${currentSession.id}\n`;
-      text += `Дата: ${new Date(currentSession.created_at).toLocaleString()}\n`;
-      text += `Статус: ${currentSession.status}\n`;
-      text += `=${'='.repeat(50)}\n\n`;
+      // PDF экспорт - HTML формат для печати (по аналогии с Confluence)
+      let html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Ретроспектива: ${escapeHtml(currentSession.name)}</title>
+  <style>
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .card { break-inside: avoid; }
+    }
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    h1 { color: #333; border-bottom: 2px solid #6366f1; padding-bottom: 10px; }
+    h2 { color: #6366f1; margin-top: 30px; page-break-before: auto; }
+    .session-info { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+    .tab-section { margin-bottom: 40px; }
+    .columns-container { display: flex; gap: 15px; }
+    .discussion-single-column { display: block; }
+    .column { flex: 1; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 15px; min-width: 0; }
+    .column-header { padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; text-align: center; color: white; font-weight: bold; }
+    .card { padding: 12px; margin: 10px 0; border-radius: 8px; border-left: 5px solid; page-break-inside: avoid; }
+    .card-content { margin: 10px 0; word-wrap: break-word; }
+    .card-meme { max-width: 100%; max-height: 200px; border-radius: 6px; margin: 8px 0; }
+    .card-emoji { font-size: 2.5rem; text-align: center; margin: 10px 0; }
+    .reactions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
+    .reaction { background: #e5e7eb; padding: 4px 10px; border-radius: 16px; font-size: 0.875rem; display: flex; align-items: center; gap: 4px; }
+    .vote-reaction { background: #ef4444; color: white; padding: 6px 12px; border-radius: 50%; font-size: 0.875rem; display: inline-flex; align-items: center; gap: 4px; min-width: 40px; justify-content: center; }
+    .vote-reaction .icon { font-size: 1.2rem; }
+    .action-plan { background: #f0f2ff; border: 1px solid #6366f1; border-radius: 6px; padding: 10px; margin-top: 10px; }
+    .action-plan-header { color: #6366f1; font-weight: bold; margin-bottom: 8px; }
+    .discussion-card { background: #fff8e1; border-left-color: #f59e0b !important; }
+    /* Цвета карточек по категориям */
+    .card.template-classic-start { background-color: rgba(16, 185, 129, 0.08); border-left-color: #10b981; }
+    .card.template-classic-stop { background-color: rgba(239, 68, 68, 0.08); border-left-color: #ef4444; }
+    .card.template-classic-continue { background-color: rgba(59, 130, 246, 0.08); border-left-color: #3b82f6; }
+    .card.template-mad-sad-glad-mad { background-color: rgba(239, 68, 68, 0.08); border-left-color: #ef4444; }
+    .card.template-mad-sad-glad-sad { background-color: rgba(245, 158, 11, 0.08); border-left-color: #f59e0b; }
+    .card.template-mad-sad-glad-glad { background-color: rgba(16, 185, 129, 0.08); border-left-color: #10b981; }
+    .card.template-good-bad-ideas-good { background-color: rgba(16, 185, 129, 0.08); border-left-color: #10b981; }
+    .card.template-good-bad-ideas-bad { background-color: rgba(239, 68, 68, 0.08); border-left-color: #ef4444; }
+    .card.template-good-bad-ideas-ideas { background-color: rgba(245, 158, 11, 0.08); border-left-color: #f59e0b; }
+    .card.template-kiss-keep { background-color: rgba(59, 130, 246, 0.08); border-left-color: #3b82f6; }
+    .card.template-kiss-improve { background-color: rgba(245, 158, 11, 0.08); border-left-color: #f59e0b; }
+    .card.template-kiss-start { background-color: rgba(16, 185, 129, 0.08); border-left-color: #10b981; }
+    .card.template-kiss-stop { background-color: rgba(239, 68, 68, 0.08); border-left-color: #ef4444; }
+    .card.template-sailboat-wind { background-color: rgba(6, 182, 212, 0.08); border-left-color: #06b6d4; }
+    .card.template-sailboat-anchor { background-color: rgba(245, 158, 11, 0.08); border-left-color: #f59e0b; }
+    .card.template-sailboat-rocks { background-color: rgba(107, 114, 128, 0.08); border-left-color: #6b7280; }
+    .card.template-sailboat-island { background-color: rgba(16, 185, 129, 0.08); border-left-color: #10b981; }
+    .card.template-freeform-general { background-color: rgba(99, 102, 241, 0.08); border-left-color: #6366f1; }
+    /* Цвета заголовков по шаблонам */
+    .header-template-classic-start { background-color: #10b981; }
+    .header-template-classic-stop { background-color: #ef4444; }
+    .header-template-classic-continue { background-color: #3b82f6; }
+    .header-template-mad-sad-glad-mad { background-color: #ef4444; }
+    .header-template-mad-sad-glad-sad { background-color: #f59e0b; }
+    .header-template-mad-sad-glad-glad { background-color: #10b981; }
+    .header-template-good-bad-ideas-good { background-color: #10b981; }
+    .header-template-good-bad-ideas-bad { background-color: #ef4444; }
+    .header-template-good-bad-ideas-ideas { background-color: #f59e0b; }
+    .header-template-kiss-keep { background-color: #3b82f6; }
+    .header-template-kiss-improve { background-color: #f59e0b; }
+    .header-template-kiss-start { background-color: #10b981; }
+    .header-template-kiss-stop { background-color: #ef4444; }
+    .header-template-sailboat-wind { background-color: #06b6d4; }
+    .header-template-sailboat-anchor { background-color: #f59e0b; }
+    .header-template-sailboat-rocks { background-color: #6b7280; }
+    .header-template-sailboat-island { background-color: #10b981; }
+    .header-template-freeform-general { background-color: #6366f1; }
+  </style>
+</head>
+<body>
+  <h1>🎯 Ретроспектива: ${escapeHtml(currentSession.name)}</h1>
+  
+  <div class="session-info">
+    <p><strong>ID:</strong> ${currentSession.id}<br>
+    <strong>Дата:</strong> ${new Date(currentSession.created_at).toLocaleString()}<br>
+    <strong>Статус:</strong> ${currentSession.status}<br>
+    <strong>Шаблон:</strong> ${currentSession.template}<br>
+    <strong>Ведущий:</strong> ${escapeHtml(currentSession.admin_name)}</p>
+  </div>
+
+  <div class="tab-section">
+    <h2>🧠 Brain Storm</h2>
+    <div class="columns-container">
+`;
 
       const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
-      
-      // Экспорт карточек по колонкам
+      const templateName = currentSession.template;
+
+      // Экспорт по колонкам с полным содержимым
       template.columns.forEach(col => {
-        text += `${col.name}\n${'-'.repeat(30)}\n`;
         const colItems = items.filter(i => i.category === col.category);
+        const categoryClass = `template-${templateName}-${col.category}`;
+
+        html += `      <div class="column">
+        <div class="column-header header-${categoryClass}">
+          <h3>${escapeHtml(col.name)}</h3>
+        </div>
+`;
+
         colItems.forEach(item => {
-          text += `  • ${item.text}\n`;
-          text += `    Автор: ${item.author}\n`;
-          
-          // Реакции
-          if (item.reactions) {
-            const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
-            const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
-            if (activeReactions.length > 0) {
-              text += `    Реакции: ${activeReactions.map(([name, count]) => `${name}:${count}`).join(' ')}\n`;
+          html += `        <div class="card ${categoryClass}">
+`;
+
+          // Автор и дата
+          html += `          <div style="font-size: 0.75rem; color: #666; margin-bottom: 8px;">
+            <span style="display: flex; align-items: center; gap: 4px;">
+              <span style="font-weight: bold;">👤 ${escapeHtml(item.author)}</span>
+            </span>
+            <span style="color: #999; margin-left: 10px;">📅 ${new Date(item.created_at).toLocaleString()}</span>
+          </div>
+`;
+
+          // Содержимое карточки (текст, мемы, смайлы)
+          html += `          <div class="card-content">
+`;
+
+          if (item.meme_url) {
+            html += `            <img src="${escapeHtml(item.meme_url)}" alt="Meme" class="card-meme">\n`;
+          } else if (item.text) {
+            const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
+            if (markdownMemeMatch) {
+              html += `            <img src="${escapeHtml(markdownMemeMatch[2])}" alt="${escapeHtml(markdownMemeMatch[1])}" class="card-meme">\n`;
+              const remainingText = item.text.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
+              if (remainingText) {
+                html += `            <div style="margin-top: 8px;">${escapeHtml(remainingText)}</div>\n`;
+              }
+            } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
+              html += `            <div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
+            } else {
+              html += `            <div>${escapeHtml(item.text)}</div>\n`;
             }
           }
-          
-          // План действий
-          if (item.action_plan_text || item.action_plan_who || item.action_plan_when) {
-            text += `    План действий:\n`;
-            if (item.action_plan_text) text += `      ${item.action_plan_text}\n`;
-            if (item.action_plan_who) text += `      Кому: ${item.action_plan_who}\n`;
-            if (item.action_plan_when) text += `      Когда: ${item.action_plan_when}\n`;
-          }
-          text += '\n';
-        });
-      });
+          html += `          </div>
+`;
 
-      // Экспорт карточек из Обсуждения (выбранные)
-      const discussionItems = items.filter(i => i.for_discussion);
-      if (discussionItems.length > 0) {
-        text += `\nОбсуждение\n${'='.repeat(30)}\n`;
-        discussionItems.forEach(item => {
-          text += `\n${item.text}\n`;
-          text += `  Автор: ${item.author}\n`;
-          if (item.action_plan_text || item.action_plan_who || item.action_plan_when) {
-            text += `  План действий:\n`;
-            if (item.action_plan_text) text += `    ${item.action_plan_text}\n`;
-            if (item.action_plan_who) text += `    Кому: ${item.action_plan_who}\n`;
-            if (item.action_plan_when) text += `    Когда: ${item.action_plan_when}\n`;
-          }
-        });
-      }
-
-      const blob = new Blob([text], { type: 'text/plain' });
-      downloadBlob(blob, `retro-${currentSession.id}.txt`);
-    } else if (format === 'confluence') {
-      // Confluence экспорт - HTML формат
-      let html = `<h1>Ретроспектива: ${escapeHtml(currentSession.name)}</h1>\n`;
-      html += `<p><strong>ID:</strong> ${currentSession.id}<br>\n`;
-      html += `<strong>Дата:</strong> ${new Date(currentSession.created_at).toLocaleString()}<br>\n`;
-      html += `<strong>Статус:</strong> ${currentSession.status}</p>\n`;
-      html += `<hr>\n\n`;
-
-      const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
-      
-      // Таблица с карточками по колонкам
-      html += `<h2>Brain Storm</h2>\n`;
-      html += `<table class="wrapped" style="width:100%; border-collapse: collapse;">\n`;
-      html += `<thead><tr><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Категория</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Карточка</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Автор</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Реакции</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">План действий</th></tr></thead>\n`;
-      html += `<tbody>\n`;
-      
-      template.columns.forEach(col => {
-        const colItems = items.filter(i => i.category === col.category);
-        colItems.forEach(item => {
-          html += `<tr>\n`;
-          html += `<td style="border:1px solid #ccc; padding:8px;"><strong>${escapeHtml(col.name)}</strong></td>\n`;
-          html += `<td style="border:1px solid #ccc; padding:8px;">${escapeHtml(item.text)}</td>\n`;
-          html += `<td style="border:1px solid #ccc; padding:8px;">${escapeHtml(item.author)}</td>\n`;
-          
           // Реакции
-          let reactionsHtml = '';
           if (item.reactions) {
             const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
-            const emojiMap = { 'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉', 'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩', 'hundred':'💯', 'pray':'🙏' };
+            const emojiMap = {
+              'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉',
+              'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩',
+              'hundred':'💯', 'pray':'🙏', 'laugh':'🤣', 'love':'😍', 'surprised':'😮'
+            };
             const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
-            reactionsHtml = activeReactions.map(([name, count]) => `${emojiMap[name] || name} ${count}`).join(' ');
+            if (activeReactions.length > 0) {
+              html += `          <div class="reactions">\n`;
+              activeReactions.forEach(([name, count]) => {
+                html += `            <span class="reaction">${emojiMap[name] || name} ${count}</span>\n`;
+              });
+              html += `          </div>\n`;
+            }
           }
-          html += `<td style="border:1px solid #ccc; padding:8px;">${reactionsHtml}</td>\n`;
-          
-          // План действий
-          let planHtml = '';
-          if (item.action_plan_text) planHtml += `<p><strong>План:</strong> ${escapeHtml(item.action_plan_text)}</p>\n`;
-          if (item.action_plan_who) planHtml += `<p><strong>Кому:</strong> ${escapeHtml(item.action_plan_who)}</p>\n`;
-          if (item.action_plan_when) planHtml += `<p><strong>Когда:</strong> ${escapeHtml(item.action_plan_when)}</p>\n`;
-          html += `<td style="border:1px solid #ccc; padding:8px;">${planHtml || '-'}</td>\n`;
-          
-          html += `</tr>\n`;
-        });
-      });
-      
-      html += `</tbody>\n</table>\n\n`;
 
-      // Обсуждение
-      const discussionItems = items.filter(i => i.for_discussion);
-      if (discussionItems.length > 0) {
-        html += `<h2>Обсуждение</h2>\n`;
-        html += `<table class="wrapped" style="width:100%; border-collapse: collapse;">\n`;
-        html += `<thead><tr><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Карточка</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">Автор</th><th style="border:1px solid #ccc; padding:8px; background:#f5f5f5;">План действий</th></tr></thead>\n`;
-        html += `<tbody>\n`;
-        
-        discussionItems.forEach(item => {
-          html += `<tr>\n`;
-          html += `<td style="border:1px solid #ccc; padding:8px;">${escapeHtml(item.text)}</td>\n`;
-          html += `<td style="border:1px solid #ccc; padding:8px;">${escapeHtml(item.author)}</td>\n`;
-          
-          let planHtml = '';
-          if (item.action_plan_text) planHtml += `<p><strong>План:</strong> ${escapeHtml(item.action_plan_text)}</p>\n`;
-          if (item.action_plan_who) planHtml += `<p><strong>Кому:</strong> ${escapeHtml(item.action_plan_who)}</p>\n`;
-          if (item.action_plan_when) planHtml += `<p><strong>Когда:</strong> ${escapeHtml(item.action_plan_when)}</p>\n`;
-          html += `<td style="border:1px solid #ccc; padding:8px;">${planHtml || '-'}</td>\n`;
-          
-          html += `</tr>\n`;
+          // Голоса голосования (круглые красные лайки)
+          if (item.vote_mode_votes) {
+            const voteCount = typeof item.vote_mode_votes === 'string' ?
+              JSON.parse(item.vote_mode_votes).length :
+              (Array.isArray(item.vote_mode_votes) ? item.vote_mode_votes.length : 0);
+            if (voteCount > 0) {
+              html += `          <div class="reactions">\n`;
+              html += `            <span class="vote-reaction"><span class="icon">👍</span> ${voteCount}</span>\n`;
+              html += `          </div>\n`;
+            }
+          }
+
+          html += `        </div>\n`;
         });
-        
-        html += `</tbody>\n</table>\n`;
+
+        html += `      </div>\n`;
+      });
+
+      html += `    </div>
+  </div>
+
+  <div class="tab-section">
+    <h2>💬 Обсуждение</h2>
+    <div class="discussion-single-column">
+`;
+
+      // Обсуждение - выбранные карточки в один столбец
+      const discussionItems = items.filter(i => i.for_discussion);
+      discussionItems.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+      discussionItems.forEach(item => {
+        const categoryClass = `template-${templateName}-${item.category}`;
+        const template_col = template.columns.find(c => c.category === item.category);
+        const categoryName = template_col ? template_col.name : item.category;
+
+        html += `      <div class="card discussion-card ${categoryClass}">
+`;
+
+        html += `        <div style="background: #f59e0b; color: white; padding: 8px 12px; border-radius: 6px 6px 0 0; margin: -12px -12px 12px -12px; font-weight: bold; text-align: center;">
+          ${escapeHtml(categoryName)}
+        </div>
+`;
+
+        html += `        <div style="font-size: 0.75rem; color: #666; margin-bottom: 8px;">
+          <span style="display: flex; align-items: center; gap: 4px;">
+            <span style="font-weight: bold;">👤 ${escapeHtml(item.author)}</span>
+          </span>
+          <span style="color: #999; margin-left: 10px;">📅 ${new Date(item.created_at).toLocaleString()}</span>
+        </div>
+`;
+
+        html += `        <div class="card-content">
+`;
+        if (item.meme_url) {
+          html += `          <img src="${escapeHtml(item.meme_url)}" alt="Meme" class="card-meme">\n`;
+        } else if (item.text) {
+          const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
+          if (markdownMemeMatch) {
+            html += `          <img src="${escapeHtml(markdownMemeMatch[2])}" alt="${escapeHtml(markdownMemeMatch[1])}" class="card-meme">\n`;
+            const remainingText = item.text.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
+            if (remainingText) {
+              html += `          <div style="margin-top: 8px;">${escapeHtml(remainingText)}</div>\n`;
+            }
+          } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
+            html += `          <div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
+          } else {
+            html += `          <div>${escapeHtml(item.text)}</div>\n`;
+          }
+        }
+        html += `        </div>
+`;
+
+        // Реакции
+        if (item.reactions) {
+          const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
+          const emojiMap = {
+            'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉',
+            'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩',
+            'hundred':'💯', 'pray':'🙏', 'laugh':'🤣', 'love':'😍', 'surprised':'😮'
+          };
+          const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
+          if (activeReactions.length > 0) {
+            html += `        <div class="reactions">\n`;
+            activeReactions.forEach(([name, count]) => {
+              html += `          <span class="reaction">${emojiMap[name] || name} ${count}</span>\n`;
+            });
+            html += `        </div>\n`;
+          }
+        }
+
+        // Голоса голосования
+        if (item.vote_mode_votes) {
+          const voteCount = typeof item.vote_mode_votes === 'string' ?
+            JSON.parse(item.vote_mode_votes).length :
+            (Array.isArray(item.vote_mode_votes) ? item.vote_mode_votes.length : 0);
+          if (voteCount > 0) {
+            html += `        <div class="reactions">\n`;
+            html += `          <span class="vote-reaction"><span class="icon">👍</span> ${voteCount}</span>\n`;
+            html += `        </div>\n`;
+          }
+        }
+
+        // План действий
+        if (item.action_plan_text || item.action_plan_who || item.action_plan_when) {
+          html += `        <div class="action-plan">
+          <div class="action-plan-header">📋 План действий</div>
+`;
+          if (item.action_plan_text) {
+            html += `            <div style="margin-bottom: 8px;"><strong>Текст:</strong> ${item.action_plan_text}</div>\n`;
+          }
+          if (item.action_plan_who) {
+            html += `            <div style="margin-bottom: 8px;"><strong>👤 Кому:</strong> ${escapeHtml(item.action_plan_who)}</div>\n`;
+          }
+          if (item.action_plan_when) {
+            html += `            <div><strong>📅 Когда:</strong> ${escapeHtml(item.action_plan_when)}</div>\n`;
+          }
+          html += `        </div>\n`;
+        }
+
+        html += `      </div>\n`;
+      });
+
+      if (discussionItems.length === 0) {
+        html += `      <p style="color: #999; text-align: center; padding: 40px;">Нет карточек для обсуждения</p>\n`;
       }
+
+      html += `    </div>
+  </div>
+  <script>window.print();<\/script>
+</body>
+</html>`;
+
+      const blob = new Blob([html], { type: 'text/html' });
+      downloadBlob(blob, `retro-${currentSession.id}-print.html`);
+    } else if (format === 'confluence') {
+      // Confluence экспорт - HTML формат с полным сохранением структуры
+      let html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Ретроспектива: ${escapeHtml(currentSession.name)}</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    h1 { color: #333; border-bottom: 2px solid #6366f1; padding-bottom: 10px; }
+    h2 { color: #6366f1; margin-top: 30px; }
+    .session-info { background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+    .tab-section { margin-bottom: 40px; }
+    .columns-container { display: flex; gap: 15px; }
+    .discussion-single-column { display: block; }
+    .column { flex: 1; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 15px; }
+    .column-header { padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; text-align: center; color: white; font-weight: bold; }
+    .card { padding: 12px; margin: 10px 0; border-radius: 8px; border-left: 5px solid; }
+    .card-content { margin: 10px 0; word-wrap: break-word; }
+    .card-meme { max-width: 100%; max-height: 200px; border-radius: 6px; margin: 8px 0; }
+    .card-emoji { font-size: 2.5rem; text-align: center; margin: 10px 0; }
+    .reactions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
+    .reaction { background: #e5e7eb; padding: 4px 10px; border-radius: 16px; font-size: 0.875rem; display: flex; align-items: center; gap: 4px; }
+    .vote-reaction { background: #ef4444; color: white; padding: 6px 12px; border-radius: 50%; font-size: 0.875rem; display: inline-flex; align-items: center; gap: 4px; min-width: 40px; justify-content: center; }
+    .vote-reaction .icon { font-size: 1.2rem; }
+    .action-plan { background: #f0f2ff; border: 1px solid #6366f1; border-radius: 6px; padding: 10px; margin-top: 10px; }
+    .action-plan-header { color: #6366f1; font-weight: bold; margin-bottom: 8px; }
+    .discussion-card { background: #fff8e1; border-left-color: #f59e0b !important; }
+    /* Цвета карточек по категориям */
+    .card.template-classic-start { background-color: rgba(16, 185, 129, 0.08); border-left-color: #10b981; }
+    .card.template-classic-stop { background-color: rgba(239, 68, 68, 0.08); border-left-color: #ef4444; }
+    .card.template-classic-continue { background-color: rgba(59, 130, 246, 0.08); border-left-color: #3b82f6; }
+    .card.template-mad-sad-glad-mad { background-color: rgba(239, 68, 68, 0.08); border-left-color: #ef4444; }
+    .card.template-mad-sad-glad-sad { background-color: rgba(245, 158, 11, 0.08); border-left-color: #f59e0b; }
+    .card.template-mad-sad-glad-glad { background-color: rgba(16, 185, 129, 0.08); border-left-color: #10b981; }
+    .card.template-good-bad-ideas-good { background-color: rgba(16, 185, 129, 0.08); border-left-color: #10b981; }
+    .card.template-good-bad-ideas-bad { background-color: rgba(239, 68, 68, 0.08); border-left-color: #ef4444; }
+    .card.template-good-bad-ideas-ideas { background-color: rgba(245, 158, 11, 0.08); border-left-color: #f59e0b; }
+    .card.template-kiss-keep { background-color: rgba(59, 130, 246, 0.08); border-left-color: #3b82f6; }
+    .card.template-kiss-improve { background-color: rgba(245, 158, 11, 0.08); border-left-color: #f59e0b; }
+    .card.template-kiss-start { background-color: rgba(16, 185, 129, 0.08); border-left-color: #10b981; }
+    .card.template-kiss-stop { background-color: rgba(239, 68, 68, 0.08); border-left-color: #ef4444; }
+    .card.template-sailboat-wind { background-color: rgba(6, 182, 212, 0.08); border-left-color: #06b6d4; }
+    .card.template-sailboat-anchor { background-color: rgba(245, 158, 11, 0.08); border-left-color: #f59e0b; }
+    .card.template-sailboat-rocks { background-color: rgba(107, 114, 128, 0.08); border-left-color: #6b7280; }
+    .card.template-sailboat-island { background-color: rgba(16, 185, 129, 0.08); border-left-color: #10b981; }
+    .card.template-freeform-general { background-color: rgba(99, 102, 241, 0.08); border-left-color: #6366f1; }
+    /* Цвета заголовков по шаблонам */
+    .header-template-classic-start { background-color: #10b981; }
+    .header-template-classic-stop { background-color: #ef4444; }
+    .header-template-classic-continue { background-color: #3b82f6; }
+    .header-template-mad-sad-glad-mad { background-color: #ef4444; }
+    .header-template-mad-sad-glad-sad { background-color: #f59e0b; }
+    .header-template-mad-sad-glad-glad { background-color: #10b981; }
+    .header-template-good-bad-ideas-good { background-color: #10b981; }
+    .header-template-good-bad-ideas-bad { background-color: #ef4444; }
+    .header-template-good-bad-ideas-ideas { background-color: #f59e0b; }
+    .header-template-kiss-keep { background-color: #3b82f6; }
+    .header-template-kiss-improve { background-color: #f59e0b; }
+    .header-template-kiss-start { background-color: #10b981; }
+    .header-template-kiss-stop { background-color: #ef4444; }
+    .header-template-sailboat-wind { background-color: #06b6d4; }
+    .header-template-sailboat-anchor { background-color: #f59e0b; }
+    .header-template-sailboat-rocks { background-color: #6b7280; }
+    .header-template-sailboat-island { background-color: #10b981; }
+    .header-template-freeform-general { background-color: #6366f1; }
+  </style>
+</head>
+<body>
+  <h1>🎯 Ретроспектива: ${escapeHtml(currentSession.name)}</h1>
+  
+  <div class="session-info">
+    <p><strong>ID:</strong> ${currentSession.id}<br>
+    <strong>Дата:</strong> ${new Date(currentSession.created_at).toLocaleString()}<br>
+    <strong>Статус:</strong> ${currentSession.status}<br>
+    <strong>Шаблон:</strong> ${currentSession.template}<br>
+    <strong>Ведущий:</strong> ${escapeHtml(currentSession.admin_name)}</p>
+  </div>
+
+  <div class="tab-section">
+    <h2>🧠 Brain Storm</h2>
+    <div class="columns-container">
+`;
+
+      const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
+      const templateName = currentSession.template;
+
+      // Экспорт по колонкам с полным содержимым
+      template.columns.forEach(col => {
+        const colItems = items.filter(i => i.category === col.category);
+        const categoryClass = `template-${templateName}-${col.category}`;
+
+        html += `      <div class="column">
+        <div class="column-header header-${categoryClass}">
+          <h3>${escapeHtml(col.name)}</h3>
+        </div>
+`;
+
+        colItems.forEach(item => {
+          html += `        <div class="card ${categoryClass}">
+`;
+
+          // Автор и дата
+          html += `          <div style="font-size: 0.75rem; color: #666; margin-bottom: 8px;">
+            <span style="display: flex; align-items: center; gap: 4px;">
+              <span style="font-weight: bold;">👤 ${escapeHtml(item.author)}</span>
+            </span>
+            <span style="color: #999; margin-left: 10px;">📅 ${new Date(item.created_at).toLocaleString()}</span>
+          </div>
+`;
+
+          // Содержимое карточки (текст, мемы, смайлы)
+          html += `          <div class="card-content">
+`;
+
+          if (item.meme_url) {
+            // Мем из поля meme_url - вставляем как картинку
+            html += `            <img src="${escapeHtml(item.meme_url)}" alt="Meme" class="card-meme">\n`;
+          } else if (item.text) {
+            // Проверяем на markdown формат мемов ![alt](url)
+            const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
+            if (markdownMemeMatch) {
+              // Markdown мем - извлекаем URL и вставляем как картинку
+              html += `            <img src="${escapeHtml(markdownMemeMatch[2])}" alt="${escapeHtml(markdownMemeMatch[1])}" class="card-meme">\n`;
+              // Остальной текст если есть
+              const remainingText = item.text.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
+              if (remainingText) {
+                html += `            <div style="margin-top: 8px;">${escapeHtml(remainingText)}</div>\n`;
+              }
+            } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
+              // Только эмодзи
+              html += `            <div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
+            } else {
+              // Обычный текст
+              html += `            <div>${escapeHtml(item.text)}</div>\n`;
+            }
+          }
+          html += `          </div>
+`;
+
+          // Реакции
+          if (item.reactions) {
+            const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
+            const emojiMap = { 
+              'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉', 
+              'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩', 
+              'hundred':'💯', 'pray':'🙏', 'laugh':'🤣', 'love':'😍', 'surprised':'😮' 
+            };
+            const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
+            if (activeReactions.length > 0) {
+              html += `          <div class="reactions">\n`;
+              activeReactions.forEach(([name, count]) => {
+                html += `            <span class="reaction">${emojiMap[name] || name} ${count}</span>\n`;
+              });
+              html += `          </div>\n`;
+            }
+          }
+
+          // Голоса голосования (круглые красные лайки)
+          if (item.vote_mode_votes) {
+            const voteCount = typeof item.vote_mode_votes === 'string' ? 
+              JSON.parse(item.vote_mode_votes).length : 
+              (Array.isArray(item.vote_mode_votes) ? item.vote_mode_votes.length : 0);
+            if (voteCount > 0) {
+              html += `          <div class="reactions">\n`;
+              html += `            <span class="vote-reaction"><span class="icon">👍</span> ${voteCount}</span>\n`;
+              html += `          </div>\n`;
+            }
+          }
+
+          html += `        </div>\n`;
+        });
+
+        html += `      </div>\n`;
+      });
+
+      html += `    </div>
+  </div>
+
+  <div class="tab-section">
+    <h2>💬 Обсуждение</h2>
+    <div class="discussion-single-column">
+`;
+
+      // Обсуждение - выбранные карточки в один столбец
+      const discussionItems = items.filter(i => i.for_discussion);
+
+      // Сортируем по порядку
+      discussionItems.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+      discussionItems.forEach(item => {
+        const categoryClass = `template-${templateName}-${item.category}`;
+        const template_col = template.columns.find(c => c.category === item.category);
+        const categoryName = template_col ? template_col.name : item.category;
+
+        html += `      <div class="card discussion-card ${categoryClass}">
+`;
+
+        // Заголовок категории
+        html += `        <div style="background: #f59e0b; color: white; padding: 8px 12px; border-radius: 6px 6px 0 0; margin: -12px -12px 12px -12px; font-weight: bold; text-align: center;">
+          ${escapeHtml(categoryName)}
+        </div>
+`;
+
+        // Автор и дата
+        html += `        <div style="font-size: 0.75rem; color: #666; margin-bottom: 8px;">
+          <span style="display: flex; align-items: center; gap: 4px;">
+            <span style="font-weight: bold;">👤 ${escapeHtml(item.author)}</span>
+          </span>
+          <span style="color: #999; margin-left: 10px;">📅 ${new Date(item.created_at).toLocaleString()}</span>
+        </div>
+`;
+
+        // Содержимое карточки
+        html += `        <div class="card-content">
+`;
+        if (item.meme_url) {
+          html += `          <img src="${escapeHtml(item.meme_url)}" alt="Meme" class="card-meme">\n`;
+        } else if (item.text) {
+          const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
+          if (markdownMemeMatch) {
+            html += `          <img src="${escapeHtml(markdownMemeMatch[2])}" alt="${escapeHtml(markdownMemeMatch[1])}" class="card-meme">\n`;
+            const remainingText = item.text.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
+            if (remainingText) {
+              html += `          <div style="margin-top: 8px;">${escapeHtml(remainingText)}</div>\n`;
+            }
+          } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
+            html += `          <div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
+          } else {
+            html += `          <div>${escapeHtml(item.text)}</div>\n`;
+          }
+        }
+        html += `        </div>
+`;
+
+        // Реакции
+        if (item.reactions) {
+          const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
+          const emojiMap = {
+            'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉',
+            'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩',
+            'hundred':'💯', 'pray':'🙏', 'laugh':'🤣', 'love':'😍', 'surprised':'😮'
+          };
+          const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
+          if (activeReactions.length > 0) {
+            html += `        <div class="reactions">\n`;
+            activeReactions.forEach(([name, count]) => {
+              html += `          <span class="reaction">${emojiMap[name] || name} ${count}</span>\n`;
+            });
+            html += `        </div>\n`;
+          }
+        }
+
+        // Голоса голосования (круглые красные лайки)
+        if (item.vote_mode_votes) {
+          const voteCount = typeof item.vote_mode_votes === 'string' ?
+            JSON.parse(item.vote_mode_votes).length :
+            (Array.isArray(item.vote_mode_votes) ? item.vote_mode_votes.length : 0);
+          if (voteCount > 0) {
+            html += `        <div class="reactions">\n`;
+            html += `          <span class="vote-reaction"><span class="icon">👍</span> ${voteCount}</span>\n`;
+            html += `        </div>\n`;
+          }
+        }
+
+        // План действий (только в Обсуждении)
+        if (item.action_plan_text || item.action_plan_who || item.action_plan_when) {
+          html += `        <div class="action-plan">
+          <div class="action-plan-header">📋 План действий</div>
+`;
+          if (item.action_plan_text) {
+            html += `            <div style="margin-bottom: 8px;"><strong>Текст:</strong> ${item.action_plan_text}</div>\n`;
+          }
+          if (item.action_plan_who) {
+            html += `            <div style="margin-bottom: 8px;"><strong>👤 Кому:</strong> ${escapeHtml(item.action_plan_who)}</div>\n`;
+          }
+          if (item.action_plan_when) {
+            html += `            <div><strong>📅 Когда:</strong> ${escapeHtml(item.action_plan_when)}</div>\n`;
+          }
+          html += `        </div>\n`;
+        }
+
+        html += `      </div>\n`;
+      });
+
+      if (discussionItems.length === 0) {
+        html += `      <p style="color: #999; text-align: center; padding: 40px;">Нет карточек для обсуждения</p>\n`;
+      }
+
+      html += `    </div>
+  </div>
+</body>
+</html>`;
 
       const blob = new Blob([html], { type: 'text/html' });
       downloadBlob(blob, `retro-${currentSession.id}-confluence.html`);
@@ -5137,21 +5932,27 @@ async function loadHistory() {
       return;
     }
 
+    // Проверяем, является ли текущий пользователь админом
+    const isAdmin = localStorage.getItem('isAdmin') === 'true';
+
     container.innerHTML = sessions.map(s => {
       const isActive = s.status === 'active';
+      // Только админ может завершать активные и удалять завершённые сессии
+      const canManage = isAdmin;
       return `
         <div class="list-group-item list-group-item-action session-history-item">
           <div class="d-flex w-100 justify-content-between align-items-center">
             <div onclick="viewSessionDetails('${s.id}')" style="cursor: pointer;">
               <h6 class="mb-1">${escapeHtml(s.name)}</h6>
               <small class="text-muted">ID: ${s.id}</small><br>
-              <small class="text-muted">Шаблон: ${s.template} • Ведущий: ${s.admin_name}</small><br>
+              <small class="text-muted">Шаблон: ${s.template} • Ведущий: ${escapeHtml(s.admin_name)}</small><br>
               <small class="text-muted">${new Date(s.created_at).toLocaleString()}</small>
             </div>
             <div class="text-end">
               <span class="session-status-badge status-${s.status} mb-2">${isActive ? 'Активна' : 'Завершена'}</span><br>
-              ${isActive ? `<button class="btn btn-sm btn-outline-danger me-1" onclick="event.stopPropagation(); quickEndSession('${s.id}', '${escapeHtml(s.name)}')">Завершить</button>` : ''}
-              ${!isActive ? `<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteSession('${s.id}')">Удалить</button>` : ''}
+              ${isActive && canManage ? `<button class="btn btn-sm btn-outline-danger me-1" onclick="event.stopPropagation(); quickEndSession('${s.id}', '${escapeHtml(s.name)}')">Завершить</button>` : ''}
+              ${!isActive && canManage ? `<button class="btn btn-sm btn-outline-danger" onclick="event.stopPropagation(); deleteSession('${s.id}')">Удалить</button>` : ''}
+              ${!canManage ? '<small class="text-muted">Только просмотр</small>' : ''}
             </div>
           </div>
         </div>
@@ -5214,7 +6015,6 @@ async function openSessionViewMode(sessionId) {
       exportMenu.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
       exportMenu.style.zIndex = '1000';
       exportMenu.innerHTML = `
-        <button class="btn btn-sm btn-link w-100 text-start" onclick="exportResults('json'); this.closest('div').remove();">JSON</button>
         <button class="btn btn-sm btn-link w-100 text-start" onclick="exportResults('pdf'); this.closest('div').remove();">PDF</button>
         <button class="btn btn-sm btn-link w-100 text-start" onclick="exportResults('confluence'); this.closest('div').remove();">Confluence</button>
       `;
@@ -5392,13 +6192,23 @@ function showSessionPage() {
 }
 
 // Вернуться домой
-function goHome() {
+function goHome(clearStorage = false) {
   // Уведомляем сервер о выходе из сессии
   if (currentSession && currentUserId) {
     socket.emit('participant:leave', {
       sessionId: currentSession.id,
       userId: currentUserId
     });
+  }
+
+  // Очищаем localStorage если нужно (после завершения сессии)
+  if (clearStorage) {
+    localStorage.removeItem('retroSession');
+    if (currentSession) {
+      localStorage.removeItem(`retroSessionTab_${currentSession.id}`);
+      localStorage.removeItem(`hideOthersCards_${currentSession.id}`);
+      localStorage.removeItem(`hideOthersVotes_${currentSession.id}`);
+    }
   }
 
   currentSession = null;
@@ -5411,10 +6221,10 @@ function goHome() {
   sessionEnded = false; // Сбрасываем при выходе из сессии
   currentTab = 'brainstorm'; // Сбрасываем вкладку
   selectedDiscussionItems.clear(); // Очищаем выбранные карточки
-  
+
   // Останавливаем автосохранение
   stopActionPlanAutoSave();
-  
+
   participants.clear();
   addedItems.clear();
   stopTimerInterval();
@@ -5430,7 +6240,13 @@ function goHome() {
   document.getElementById('home-page').classList.remove('d-none');
   document.getElementById('create-session-form').reset();
   document.getElementById('join-session-form').reset();
-  
+
+  // Возвращаем вкладку "Создать" обратно
+  const createTab = document.querySelector('[data-bs-target="#create-tab"]');
+  if (createTab) {
+    createTab.parentElement.style.display = '';
+  }
+
   // Проверяем наличие активной сессии и показываем кнопку "Вернуться в сессию"
   checkActiveSession();
 }

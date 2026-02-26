@@ -84,9 +84,25 @@ app.get('/api/sessions/:id', async (req, res) => {
   }
 });
 
+// Получить статус сессии (быстрая проверка)
+app.get('/api/sessions/:id/status', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, status, ended_at FROM sessions WHERE id = $1', [req.params.id]);
+    const session = result.rows[0];
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json({ id: session.id, status: session.status, ended_at: session.ended_at });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Обновить заголовки категорий (для админа)
 app.patch('/api/sessions/:id/columns', async (req, res) => {
-  const { columns } = req.body; // [{ category: 'start', name: 'New Name' }]
+  const { columns } = req.body; // [{ category: 'start', name: 'New Name', id: 'custom_123' }]
   const sessionId = req.params.id;
 
   try {
@@ -117,10 +133,14 @@ app.patch('/api/sessions/:id/columns', async (req, res) => {
     );
 
     // Отправляем событие всем клиентам
-    io.to(sessionId).emit('columns:updated', { columns: Object.keys(columnHeaders).map(cat => ({
-      category: cat,
-      name: columnHeaders[cat]
-    })) });
+    // Передаем full column objects с id для custom columns
+    io.to(sessionId).emit('columns:updated', {
+      columns: columns.map(col => ({
+        category: col.category,
+        name: col.name,
+        id: col.id || null
+      }))
+    });
 
     res.json({ success: true, column_headers: columnHeaders });
   } catch (err) {
@@ -298,6 +318,60 @@ app.delete('/api/sessions/:id/items/:itemId', async (req, res) => {
     console.log(`[WS] Emitting item:deleted to session ${sessionId}:`, { id: itemId, changes: result.rowCount });
     io.to(sessionId).emit('item:deleted', { id: itemId });
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Удалить все карточки в категории (для удаления пользовательских колонок)
+app.delete('/api/sessions/:id/items', async (req, res) => {
+  const { id: sessionId } = req.params;
+  const { category } = req.body;
+
+  try {
+    const result = await pool.query('DELETE FROM items WHERE session_id = $1 AND category = $2', [sessionId, category]);
+    console.log(`[WS] Deleted ${result.rowCount} items from category ${category} in session ${sessionId}`);
+    // Уведомляем клиентов об удалении всех карточек этой категории
+    io.to(sessionId).emit('category:deleted', { category });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Удалить пользовательскую колонку (для админа)
+app.delete('/api/sessions/:id/columns/:category', async (req, res) => {
+  const { id: sessionId } = req.params;
+  const { category } = req.params;
+
+  try {
+    // Получаем текущую сессию
+    const sessionResult = await pool.query('SELECT * FROM sessions WHERE id = $1', [sessionId]);
+    const session = sessionResult.rows[0];
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    // Получаем или инициализируем column_headers
+    let columnHeaders = session.column_headers ? JSON.parse(session.column_headers) : {};
+
+    // Удаляем заголовок колонки
+    delete columnHeaders[category];
+
+    // Сохраняем в БД
+    await pool.query(
+      'UPDATE sessions SET column_headers = $1 WHERE id = $2',
+      [JSON.stringify(columnHeaders), sessionId]
+    );
+
+    // Удаляем все карточки из этой колонки
+    await pool.query('DELETE FROM items WHERE session_id = $1 AND category = $2', [sessionId, category]);
+
+    // Отправляем событие всем клиентам об удалении колонки
+    io.to(sessionId).emit('column:deleted', { category });
+
+    res.json({ success: true, column_headers: columnHeaders });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

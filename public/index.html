@@ -64,27 +64,14 @@
                         <span class="material-icons me-1">lock_open</span>
                         Ввести пароль
                       </button>
-                      <div id="active-session-notice" class="mt-3" style="display:none;">
-                        <div class="alert alert-info mb-0">
-                          <span class="material-icons me-2 align-middle">info</span>
-                          У вас есть активная сессия
-                          <button class="btn btn-sm btn-primary ms-2" onclick="returnToSession()">
-                            <span class="material-icons" style="font-size: 16px;">login</span>
-                            Вернуться в сессию
-                          </button>
-                        </div>
-                      </div>
                     </div>
                   </div>
                   <div id="create-tab-unlocked" style="display:none;">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                      <h5 class="mb-0">🔓 Создание сессии</h5>
-                      <div>
-                        <button class="btn btn-outline-primary btn-sm me-2" id="return-session-btn" onclick="returnToSession()" style="display:none;">
-                          <span class="material-icons" style="font-size: 16px;">login</span>
-                          Вернуться в сессию
-                        </button>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="lockCreateTab()">
+                    <div class="mb-3">
+                      <h5 class="mb-2">🔓 Создание сессии</h5>
+                      <div class="d-flex align-items-center flex-wrap" style="justify-content: flex-end;">
+                        <div id="active-session-notice" style="display:none;"></div>
+                        <button class="btn btn-outline-secondary btn-sm ms-2" onclick="lockCreateTab()">
                           <span class="material-icons" style="font-size: 16px;">lock</span>
                           Закрыть
                         </button>
@@ -98,7 +85,7 @@
                     
                     <div class="mb-3">
                       <label class="form-label">Ваше имя (ведущий)</label>
-                      <input type="text" class="form-control" id="admin-name" placeholder="Имя ведущего" required>
+                      <input type="text" class="form-control" id="admin-name" placeholder="Имя ведущего">
                     </div>
                     
                     <div class="mb-3">
@@ -238,6 +225,11 @@
                 </button>
               </li>
               <li class="nav-item">
+                <button class="nav-link py-1 px-2" id="add-column-btn" onclick="addCustomColumn()" title="Добавить колонку" style="display:none;">
+                  <span class="material-icons" style="font-size: 18px;">add</span>
+                </button>
+              </li>
+              <li class="nav-item">
                 <button class="nav-link py-1 px-2" id="discussion-tab-btn" onclick="switchToTab('discussion')">
                   💬 Обсуждение <span class="badge bg-primary ms-1" id="discussion-count-badge">0</span>
                 </button>
@@ -245,9 +237,14 @@
             </ul>
           </div>
         </div>
-        
+
         <div class="d-flex align-items-center gap-3">
-          <!-- Смайлы настроения -->
+          <!-- Левая группа: Таймер -->
+          <div class="d-flex align-items-center gap-3">
+            <div id="timer-container"></div>
+          </div>
+
+          <!-- Центр: Смайлы настроения (главный блок) -->
           <div class="mood-selector" id="mood-selector-container">
             <div class="mood-item">
               <span class="mood-btn" data-mood="happy" title="Радостный">😄</span>
@@ -270,51 +267,60 @@
               <span class="mood-count" id="mood-count-dead">0</span>
             </div>
           </div>
-          
-          <div id="timer-container"></div>
-          
-          <div class="text-white" style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 8px;">
-            <small>ID: </small><strong id="session-id-display">-</strong>
-            <button class="btn btn-sm btn-link text-white ms-1" onclick="copySessionId()" title="Копировать ID">
-              <span class="material-icons" style="font-size: 16px;">content_copy</span>
-            </button>
+
+          <!-- Правая группа: все остальные элементы -->
+          <div class="d-flex align-items-center gap-3">
+            <!-- Группа голосования: Голосов + Голосовать -->
+            <div class="admin-vote-group" id="admin-vote-group" style="display:none;">
+              <div class="text-white" id="admin-votes-control" title="Лимит голосов">
+                <small>Голосов: </small>
+                <input type="number" id="vote-limit-input" class="form-control form-control-sm d-inline-block"
+                       style="width: 60px; display: inline-block; padding: 2px 6px; font-size: 0.875rem;"
+                       value="5" min="1" max="100" onchange="updateVoteLimit(this.value)" title="Установить лимит голосов">
+              </div>
+              <button class="btn btn-sm btn-light" id="vote-mode-btn" onclick="toggleVoteMode()" title="Режим голосования">
+                <span class="material-icons" style="font-size: 16px; vertical-align: middle;">thumb_up</span>
+                Голосовать
+              </button>
+            </div>
+            <div class="text-white-50" id="vote-limit-display" style="display:none;">
+              <small>Голосов: <strong id="vote-limit-value">5</strong></small>
+            </div>
+
+            <!-- Чекбоксы для админа -->
+            <div class="text-white d-flex gap-3 align-items-center" id="admin-view-controls" style="display:none; background: rgba(255,255,255,0.15); padding: 6px 12px; border-radius: 8px;">
+              <label class="form-check-label form-check-label-sm" title="Скрыть карточки других участников">
+                <input type="checkbox" id="hide-others-cards" class="form-check-input" onchange="toggleHideOthersCards(this.checked)">
+                Скрыть карточки
+              </label>
+              <label class="form-check-label form-check-label-sm" title="Скрывать голоса других участников">
+                <input type="checkbox" id="hide-others-votes" class="form-check-input" onchange="toggleHideOthersVotes(this.checked)">
+                Скрыть голоса
+              </label>
+            </div>
+
+            <span class="text-white" id="user-display"></span>
+
+            <!-- Правый край: ID сессии, кнопки Админ и Завершить -->
+            <div class="end-session-group">
+              <div class="session-id-compact">
+                <small>ID: </small><strong id="session-id-display">-</strong>
+                <button class="btn btn-sm btn-link text-white ms-1" onclick="copySessionId()" title="Копировать ID">
+                  <span class="material-icons" style="font-size: 12px;">content_copy</span>
+                </button>
+              </div>
+              <div style="display: flex; gap: 4px;">
+                <button class="btn btn-outline-light btn-sm" id="admin-panel-btn" onclick="toggleAdminPanel()" style="display:none;">
+                  <span class="material-icons">admin_panel_settings</span>
+                  Админ
+                </button>
+                <button class="btn btn-outline-light btn-sm" id="end-session-btn" onclick="endSession()" style="display:none;">
+                  <span class="material-icons">check_circle</span>
+                  Завершить
+                </button>
+              </div>
+            </div>
           </div>
-          
-          <div class="text-white" style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 8px;" id="admin-votes-control" title="Лимит голосов" style="display:none;">
-            <small>Голосов: </small>
-            <input type="number" id="vote-limit-input" class="form-control form-control-sm d-inline-block"
-                   style="width: 60px; display: inline-block; padding: 2px 6px; font-size: 0.875rem;"
-                   value="5" min="1" max="100" onchange="updateVoteLimit(this.value)" title="Установить лимит голосов">
-          </div>
-          <div class="text-white-50" id="vote-limit-display" style="display:none;">
-            <small>Голосов: <strong id="vote-limit-value">5</strong></small>
-          </div>
-          
-          <!-- Чекбоксы для админа -->
-          <div class="text-white d-flex gap-3 align-items-center" id="admin-view-controls" style="display:none; background: rgba(255,255,255,0.15); padding: 6px 12px; border-radius: 8px;">
-            <label class="form-check-label form-check-label-sm" title="Показывать только свои карточки">
-              <input type="checkbox" id="hide-others-cards" class="form-check-input" onchange="toggleHideOthersCards(this.checked)">
-              🚫📋
-            </label>
-            <label class="form-check-label form-check-label-sm" title="Скрывать голоса других участников">
-              <input type="checkbox" id="hide-others-votes" class="form-check-input" onchange="toggleHideOthersVotes(this.checked)">
-              🔇
-            </label>
-            <button class="btn btn-sm btn-light" id="vote-mode-btn" onclick="toggleVoteMode()" title="Режим голосования">
-              <span class="material-icons" style="font-size: 16px; vertical-align: middle;">thumb_up</span>
-              Голосовать
-            </button>
-          </div>
-          
-          <span class="text-white" id="user-display"></span>
-          <button class="btn btn-outline-light btn-sm" id="admin-panel-btn" onclick="toggleAdminPanel()" style="display:none;">
-            <span class="material-icons">admin_panel_settings</span>
-            Админ
-          </button>
-          <button class="btn btn-outline-light btn-sm" id="end-session-btn" onclick="endSession()" style="display:none;">
-            <span class="material-icons">check_circle</span>
-            Завершить
-          </button>
         </div>
       </div>
     </nav>
@@ -375,10 +381,6 @@
               </select>
               
               <h6 class="card-title">Экспорт</h6>
-              <button class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="exportResults('json')">
-                <span class="material-icons align-middle">download</span>
-                JSON
-              </button>
               <button class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="exportResults('pdf')">
                 <span class="material-icons align-middle">picture_as_pdf</span>
                 PDF
