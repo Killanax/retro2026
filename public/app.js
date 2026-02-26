@@ -2785,7 +2785,7 @@ function createItemHtml(item) {
       parts.forEach(part => {
         const imgMatch = part.match(/!\[(.*?)\]\((.*?)\)/);
         if (imgMatch) {
-          content += `<img src="${imgMatch[2]}" alt="${imgMatch[1]}" class="retro-item-meme">`;
+          content += `<img src="${imgMatch[2]}" alt="${imgMatch[1]}" class="retro-item-meme" data-meme-src="${imgMatch[2]}">`;
         } else {
           // Обрабатываем переносы строк и разделители
           const textPart = part
@@ -2800,7 +2800,7 @@ function createItemHtml(item) {
     } else if (item.type === 'meme') {
       // Только мем без текста
       let memeUrl = item.meme_url || item.text || '';
-      content = `<img src="${memeUrl}" alt="Meme" class="retro-item-meme" onerror="this.style.display='none'">`;
+      content = `<img src="${memeUrl}" alt="Meme" class="retro-item-meme" data-meme-src="${memeUrl}" onerror="this.style.display='none'">`;
     }
   } else if (item.type === 'emoji') {
     content = `<div class="retro-item-emoji">${item.text}</div>`;
@@ -3323,14 +3323,25 @@ function initMemeResize(element) {
   });
 }
 
-// Сохранение размера мема в localStorage
+// Сохранение размера мема в localStorage и currentSession
 function saveMemeSize(memeElement) {
-  const itemId = memeElement.closest('.retro-item')?.dataset.id;
+  const itemElement = memeElement.closest('.retro-item');
+  const itemId = itemElement?.dataset.id;
   if (!itemId) return;
 
   const width = memeElement.style.width || '';
   const height = memeElement.style.height || '';
 
+  // Сохраняем в currentSession.items если есть
+  if (currentSession?.items) {
+    const item = currentSession.items.find(i => i.id === itemId);
+    if (item) {
+      item.meme_width = width;
+      item.meme_height = height;
+    }
+  }
+
+  // Сохраняем в localStorage
   if (width || height) {
     const savedSizes = JSON.parse(localStorage.getItem('memeSizes') || '{}');
     savedSizes[itemId] = { width, height };
@@ -3338,14 +3349,30 @@ function saveMemeSize(memeElement) {
   }
 }
 
-// Восстановление размера мема из localStorage
+// Восстановление размера мема из localStorage и currentSession
 function restoreMemeSizes() {
   const savedSizes = JSON.parse(localStorage.getItem('memeSizes') || '{}');
-  Object.entries(savedSizes).forEach(([itemId, size]) => {
-    const meme = document.querySelector(`.retro-item[data-id="${itemId}"] .retro-item-meme`);
-    if (meme && size.width && size.height) {
-      meme.style.width = size.width;
-      meme.style.height = size.height;
+  
+  // Применяем размеры ко всем мемам на странице
+  document.querySelectorAll('.retro-item-meme').forEach(meme => {
+    const itemElement = meme.closest('.retro-item');
+    const itemId = itemElement?.dataset.id;
+    if (!itemId) return;
+
+    // Сначала пробуем из currentSession
+    if (currentSession?.items) {
+      const item = currentSession.items.find(i => i.id === itemId);
+      if (item && item.meme_width && item.meme_height) {
+        meme.style.width = item.meme_width;
+        meme.style.height = item.meme_height;
+        return;
+      }
+    }
+
+    // Затем из localStorage
+    if (savedSizes[itemId] && savedSizes[itemId].width && savedSizes[itemId].height) {
+      meme.style.width = savedSizes[itemId].width;
+      meme.style.height = savedSizes[itemId].height;
     }
   });
 }
@@ -4340,6 +4367,8 @@ function updateItemInColumn(item) {
       updateColumnCount(item.category);
       // Применяем режим голосования (показываем кнопки голосования если есть голоса)
       applyVoteMode();
+      // Восстанавливаем размер мема если есть
+      restoreMemeSizes();
     } else {
       console.warn('[UI] Column not found for item', item.id, 'category', item.category);
     }
@@ -4371,6 +4400,8 @@ function updateItemInColumn(item) {
       // Обновляем счётчик новой колонки
       updateColumnCount(item.category);
       console.log('[UI] Moved element from', currentCategory, 'to', item.category);
+      // Восстанавливаем размер мема если есть
+      restoreMemeSizes();
     } else {
       console.warn('[UI] New column not found for category', item.category);
     }
@@ -4388,6 +4419,8 @@ function updateItemInColumn(item) {
     // Применяем режим голосования (показываем кнопки голосования если есть голоса)
     applyVoteMode();
     console.log('[UI] Updated element in same column', item.category);
+    // Восстанавливаем размер мема если есть
+    restoreMemeSizes();
   }
 }
 
