@@ -3303,6 +3303,13 @@ function restoreMemeSizes() {
 }
 
 function handleDragStart(e) {
+  // Не разрешаем drag если мем в режиме редактирования
+  const editingMeme = this.querySelector('.retro-item-meme.editing');
+  if (editingMeme) {
+    e.preventDefault();
+    return;
+  }
+
   draggedItem = this;
   draggedItemId = this.dataset.id;
   this.classList.add('dragging');
