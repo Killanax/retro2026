@@ -1527,12 +1527,12 @@ async function loadSessionData() {
     });
     items.forEach(item => addItemToColumn(item));
 
-    // Восстанавливаем размеры мемов
-    restoreMemeSizes();
-
     // Применяем настройки отображения после загрузки всех карточек
     applyViewSettings();
-    
+
+    // Восстанавливаем размеры мемов после загрузки items в currentSession
+    setTimeout(() => restoreMemeSizes(), 100);
+
     // Если выбрана вкладка обсуждения - рендерим её после загрузки items
     if (sessionEnded && currentTab === 'discussion') {
       renderDiscussionTab();
@@ -3349,10 +3349,10 @@ function saveMemeSize(memeElement) {
   }
 }
 
-// Восстановление размера мема из localStorage и currentSession
+// Восстановление размера мема из currentSession.items (загружено с сервера) и localStorage
 function restoreMemeSizes() {
   const savedSizes = JSON.parse(localStorage.getItem('memeSizes') || '{}');
-  
+
   // Применяем размеры ко всем мемам на странице
   document.querySelectorAll('.retro-item-meme').forEach(meme => {
     const itemElement = meme.closest('.retro-item');
@@ -3365,6 +3365,7 @@ function restoreMemeSizes() {
       if (item && item.meme_width && item.meme_height) {
         meme.style.width = item.meme_width;
         meme.style.height = item.meme_height;
+        console.log('[MemeSize] Restored from currentSession:', itemId, item.meme_width, item.meme_height);
         return;
       }
     }
@@ -3373,6 +3374,7 @@ function restoreMemeSizes() {
     if (savedSizes[itemId] && savedSizes[itemId].width && savedSizes[itemId].height) {
       meme.style.width = savedSizes[itemId].width;
       meme.style.height = savedSizes[itemId].height;
+      console.log('[MemeSize] Restored from localStorage:', itemId, savedSizes[itemId].width, savedSizes[itemId].height);
     }
   });
 }
