@@ -3229,20 +3229,28 @@ function initMemeResize(element) {
   memes.forEach(meme => {
     meme.addEventListener('dblclick', function(e) {
       e.stopPropagation();
-      
+
       // Если уже в режиме редактирования - выключаем
       if (this.classList.contains('editing')) {
         this.classList.remove('editing');
         this.style.width = '';
         this.style.height = '';
         saveMemeSize(this);
+        // Включаем drag-and-drop обратно
+        element.setAttribute('draggable', 'true');
       } else {
         // Включаем режим редактирования
         document.querySelectorAll('.retro-item-meme.editing').forEach(m => {
           m.classList.remove('editing');
           saveMemeSize(m);
+          // Включаем drag-and-drop для всех карточек
+          document.querySelectorAll('.retro-item').forEach(item => {
+            item.setAttribute('draggable', 'true');
+          });
         });
         this.classList.add('editing');
+        // Отключаем drag-and-drop для этой карточки
+        element.setAttribute('draggable', 'false');
       }
     });
 
@@ -3258,6 +3266,10 @@ function initMemeResize(element) {
       document.querySelectorAll('.retro-item-meme.editing').forEach(m => {
         m.classList.remove('editing');
         saveMemeSize(m);
+        // Включаем drag-and-drop обратно
+        document.querySelectorAll('.retro-item').forEach(item => {
+          item.setAttribute('draggable', 'true');
+        });
       });
     }
   });
