@@ -491,6 +491,14 @@ app.patch('/api/sessions/:id/items/:itemId/discussion', async (req, res) => {
     const updatedResult = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
     const updatedItem = updatedResult.rows[0];
 
+    // Отправляем событие discussion:toggle всем клиентам
+    io.to(sessionId).emit('discussion:toggle', {
+      itemId,
+      userId: req.body.userId || null,
+      selected: for_discussion
+    });
+
+    // Также отправляем item:updated для синхронизации
     io.to(sessionId).emit('item:updated', updatedItem);
     res.json(updatedItem);
   } catch (err) {

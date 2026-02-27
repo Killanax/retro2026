@@ -319,7 +319,7 @@ const RANDOM_NAMES = [
   'КотоБайт', 'Пингвинчик', 'ЗайкаКод', 'ЛисаЛогик', 'СоваСкрипт', 'ЕнотикТест', 'МышаФокус', 'КроликПик', 'СлоникБаг', 'ТигрёнокПлюс',
   'ПумаПикс', 'Волчица-Вижн', 'Медвежонок-Блок', 'Панда-Пауза', 'ОбезьянаКлик', 'Пчёлка-Данные', 'Орлик-Идея', 'ЧерепашкаТим', 'АкулаАналитик', 'КотоПсихолог',
   'БобрКод', 'КотоМыш', 'ПингвТест', 'ЛисаБаг', 'СоваSQL', 'ЕнотДанные', 'КроликПикс', 'МышаСкрипт', 'ТигрЛогик', 'ПумаПлюс',
-  'ВолкФокус', 'Медвежонок-Блок', 'Панда-Чарт', 'ОбезьянаФича', 'ПчёлкаАнал', 'ОрёлИдея', 'ЧерепаФлоу', 'АкулаТест', 'СоваМетрика', 'КотикКэш',
+  'ВолкФокус', 'Медвежонок-Блок', 'Панда-Чарт', 'ОбезьянаФича', 'ПчёлкаАналитик', 'ОрёлИдея', 'ЧерепаФлоу', 'АкулаТест', 'СоваМетрика', 'КотикКэш',
   'ЗайкаСессия', 'ЛисёнокБайт', 'ПингвинПинг', 'КотДетектив', 'БурёнкаБаг', 'КотоКлик', 'Сова-Ретро', 'Енот-Инсайт', 'Кролик-Клик', 'Мышь-Мета',
   'Тигр-Тикет', 'Пума-Пайплайн', 'Волчица-Виз', 'Медведь-Модель', 'Панда-Пауза', 'Обезьяна-Оценка', 'ПтичкаПрогноз', 'Слоник-Сессия', 'Кот-Коммит', 'Заяц-Запрос',
   'ЛисаЛуп', 'Пингвин-Пулл', 'Сова-Сейф', 'Енот-Эффект', 'Кролик-Ковер', 'Мыш-Монитор', 'Тигр-Тренд', 'ПумаПротокол', 'Волк-Валидация', 'Котик-Коннект',
@@ -4725,6 +4725,18 @@ function toggleVoteMode() {
     saveSession();
     // Показываем вкладки
     document.getElementById('session-tabs').style.display = 'flex';
+
+    // Синхронизируем selectedDiscussionItems с currentSession.items
+    selectedDiscussionItems.clear();
+    if (currentSession?.items) {
+      currentSession.items.forEach(item => {
+        if (item.for_discussion) {
+          selectedDiscussionItems.add(item.id);
+        }
+      });
+    }
+    updateDiscussionCount();
+
     // Перерисовываем карточки с чекбоксами - обновляем каждую карточку
     document.querySelectorAll('.retro-item').forEach(itemEl => {
       const itemId = itemEl.dataset.id;
@@ -4941,11 +4953,19 @@ function renderColumnsForBrainstorm() {
 // Переключение карточки для обсуждения
 async function toggleDiscussionItem(itemId) {
   const isSelected = !selectedDiscussionItems.has(itemId);
-  
+
   if (isSelected) {
     selectedDiscussionItems.add(itemId);
   } else {
     selectedDiscussionItems.delete(itemId);
+  }
+
+  // Обновляем for_discussion в currentSession.items
+  if (currentSession?.items) {
+    const item = currentSession.items.find(i => i.id === itemId);
+    if (item) {
+      item.for_discussion = isSelected;
+    }
   }
 
   // Сохраняем в БД
@@ -4976,12 +4996,12 @@ async function toggleDiscussionItem(itemId) {
 
   // Обновляем счётчик
   updateDiscussionCount();
-  
+
   // Если мы во вкладке обсуждения - перерисовываем
   if (currentTab === 'discussion') {
     renderDiscussionTab();
   }
-  
+
   showToast(selectedDiscussionItems.has(itemId) ? 'Добавлено в обсуждение' : 'Удалено из обсуждения', 'info');
 }
 
@@ -5004,7 +5024,28 @@ function renderDiscussionTab() {
   }
 
   // Находим выбранные карточки в currentSession.items
-  const discussionItems = currentSession?.items?.filter(item => selectedDiscussionItems.has(item.id)) || [];
+  // Используем Set для предотвращения дублирования
+  const renderedItemIds = new Set();
+  const discussionItems = [];
+
+  if (currentSession?.items) {
+    currentSession.items.forEach(item => {
+      // Проверяем что карточка выбрана для обсуждения и ещё не была добавлена
+      if (selectedDiscussionItems.has(item.id) && !renderedItemIds.has(item.id)) {
+        discussionItems.push(item);
+        renderedItemIds.add(item.id);
+      }
+    });
+  }
+
+  // Также синхронизируем selectedDiscussionItems с actual items
+  // Удаляем из selectedDiscussionItems itemId которых нет в currentSession.items
+  selectedDiscussionItems.forEach(itemId => {
+    const itemExists = currentSession?.items?.some(i => i.id === itemId);
+    if (!itemExists) {
+      selectedDiscussionItems.delete(itemId);
+    }
+  });
 
   if (discussionItems.length === 0) {
     container.innerHTML = '<p class="text-muted text-center">Выбранные карточки не найдены</p>';
@@ -5760,13 +5801,38 @@ async function exportResults(format) {
       const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
       const templateName = currentSession.template;
 
-      // Экспорт по колонкам с полным содержимым
-      template.columns.forEach(col => {
+      // Собираем все колонки: стандартные из шаблона + кастомные
+      const allColumns = [...template.columns];
+
+      // Добавляем кастомные колонки, если они есть
+      if (currentSession.customColumns && currentSession.customColumns.length > 0) {
+        currentSession.customColumns.forEach(customCol => {
+          // Проверяем, нет ли уже такой колонки (чтобы избежать дублирования)
+          if (!allColumns.find(col => col.category === customCol.category)) {
+            allColumns.push({
+              name: customCol.name,
+              category: customCol.category,
+              icon: customCol.icon || 'add_column'
+            });
+          }
+        });
+      }
+
+      // Добавим универсальный стиль для кастомных колонок
+      html += `    /* Универсальный стиль для кастомных колонок - фиолетовый цвет */
+    .column-header[class*="header-"] { background-color: #6366f1; }
+`;
+
+      // Экспорт по всем колонкам с полным содержимым
+      allColumns.forEach(col => {
         const colItems = items.filter(i => i.category === col.category);
         const categoryClass = `template-${templateName}-${col.category}`;
 
+        // Определяем имя класса для заголовка (заменяем пробелы и спецсимволы)
+        const headerClass = `header-${templateName}-${col.category.replace(/\s+/g, '-').toLowerCase()}`;
+
         html += `      <div class="column">
-        <div class="column-header header-${categoryClass}">
+        <div class="column-header ${headerClass}">
           <h3>${escapeHtml(col.name)}</h3>
         </div>
 `;
@@ -6046,13 +6112,38 @@ async function exportResults(format) {
       const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
       const templateName = currentSession.template;
 
-      // Экспорт по колонкам с полным содержимым
-      template.columns.forEach(col => {
+      // Собираем все колонки: стандартные из шаблона + кастомные
+      const allColumns = [...template.columns];
+
+      // Добавляем кастомные колонки, если они есть
+      if (currentSession.customColumns && currentSession.customColumns.length > 0) {
+        currentSession.customColumns.forEach(customCol => {
+          // Проверяем, нет ли уже такой колонки (чтобы избежать дублирования)
+          if (!allColumns.find(col => col.category === customCol.category)) {
+            allColumns.push({
+              name: customCol.name,
+              category: customCol.category,
+              icon: customCol.icon || 'add_column'
+            });
+          }
+        });
+      }
+
+      // Добавим универсальный стиль для кастомных колонок
+      html += `    /* Универсальный стиль для кастомных колонок - фиолетовый цвет */
+    .column-header[class*="header-"] { background-color: #6366f1; }
+`;
+
+      // Экспорт по всем колонкам с полным содержимым
+      allColumns.forEach(col => {
         const colItems = items.filter(i => i.category === col.category);
         const categoryClass = `template-${templateName}-${col.category}`;
 
+        // Определяем имя класса для заголовка (заменяем пробелы и спецсимволы)
+        const headerClass = `header-${templateName}-${col.category.replace(/\s+/g, '-').toLowerCase()}`;
+
         html += `      <div class="column">
-        <div class="column-header header-${categoryClass}">
+        <div class="column-header ${headerClass}">
           <h3>${escapeHtml(col.name)}</h3>
         </div>
 `;

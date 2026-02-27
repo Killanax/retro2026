@@ -302,14 +302,14 @@
             <span class="text-white" id="user-display"></span>
 
             <!-- Правый край: ID сессии, кнопки Админ и Завершить -->
-            <div class="end-session-group">
+            <div class="d-flex flex-column align-items-center gap-2" style="margin-left: auto;">
               <div class="session-id-compact">
                 <small>ID: </small><strong id="session-id-display">-</strong>
                 <button class="btn btn-sm btn-link text-white ms-1" onclick="copySessionId()" title="Копировать ID">
                   <span class="material-icons" style="font-size: 12px;">content_copy</span>
                 </button>
               </div>
-              <div style="display: flex; gap: 4px;">
+              <div class="d-flex gap-2">
                 <button class="btn btn-outline-light btn-sm" id="admin-panel-btn" onclick="toggleAdminPanel()" style="display:none;">
                   <span class="material-icons">admin_panel_settings</span>
                   Админ
