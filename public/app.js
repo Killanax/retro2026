@@ -5780,6 +5780,8 @@ async function exportResults(format) {
     .header-template-sailboat-rocks { background-color: #6b7280; }
     .header-template-sailboat-island { background-color: #10b981; }
     .header-template-freeform-general { background-color: #6366f1; }
+    /* Универсальный стиль для кастомных колонок */
+    .column-header[class*="header-template-freeform-"] { background-color: #6366f1; }
   </style>
 </head>
 <body>
@@ -5817,11 +5819,6 @@ async function exportResults(format) {
           }
         });
       }
-
-      // Добавим универсальный стиль для кастомных колонок
-      html += `    /* Универсальный стиль для кастомных колонок - фиолетовый цвет */
-    .column-header[class*="header-"] { background-color: #6366f1; }
-`;
 
       // Экспорт по всем колонкам с полным содержимым
       allColumns.forEach(col => {
@@ -6091,6 +6088,8 @@ async function exportResults(format) {
     .header-template-sailboat-rocks { background-color: #6b7280; }
     .header-template-sailboat-island { background-color: #10b981; }
     .header-template-freeform-general { background-color: #6366f1; }
+    /* Универсальный стиль для кастомных колонок */
+    .column-header[class*="header-template-freeform-"] { background-color: #6366f1; }
   </style>
 </head>
 <body>
@@ -6128,11 +6127,6 @@ async function exportResults(format) {
           }
         });
       }
-
-      // Добавим универсальный стиль для кастомных колонок
-      html += `    /* Универсальный стиль для кастомных колонок - фиолетовый цвет */
-    .column-header[class*="header-"] { background-color: #6366f1; }
-`;
 
       // Экспорт по всем колонкам с полным содержимым
       allColumns.forEach(col => {
