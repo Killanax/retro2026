@@ -239,12 +239,7 @@
         </div>
 
         <div class="d-flex align-items-center gap-3">
-          <!-- Левая группа: Таймер -->
-          <div class="d-flex align-items-center gap-3">
-            <div id="timer-container"></div>
-          </div>
-
-          <!-- Центр: Смайлы настроения (главный блок) -->
+          <!-- Левая группа: Смайлы настроения (главный блок) -->
           <div class="mood-selector" id="mood-selector-container">
             <div class="mood-item">
               <span class="mood-btn" data-mood="happy" title="Радостный">😄</span>
@@ -266,6 +261,11 @@
               <span class="mood-btn" data-mood="dead" title="Почти умер">💀</span>
               <span class="mood-count" id="mood-count-dead">0</span>
             </div>
+          </div>
+
+          <!-- Центр: Таймер -->
+          <div class="d-flex align-items-center gap-3">
+            <div id="timer-container"></div>
           </div>
 
           <!-- Правая группа: все остальные элементы -->
@@ -331,9 +331,10 @@
         <div class="col-12 mb-3">
           <div class="card shadow-sm">
             <div class="card-body py-2">
-              <h6 class="card-title mb-2">
+              <h6 class="card-title mb-2 d-inline-flex align-items-center">
                 <span class="material-icons" style="font-size: 18px; vertical-align: middle;">group</span>
                 Участники сессии
+                <span class="participants-count-inline" id="participants-count-inline">0</span>
               </h6>
               <div class="participants-list" id="participants-list">
                 <span class="text-muted">Загрузка...</span>
@@ -416,12 +417,6 @@
                 </button>
               </li>
               <li class="nav-item">
-                <button class="nav-link" type="button" data-bs-toggle="tab" data-bs-target="#tab-meme">
-                  <span class="material-icons">image</span>
-                  Мем
-                </button>
-              </li>
-              <li class="nav-item">
                 <button class="nav-link" type="button" data-bs-toggle="tab" data-bs-target="#tab-emoji">
                   <span class="material-icons">sentiment_satisfied</span>
                   Смайлы
@@ -471,23 +466,6 @@
                   <span class="material-icons" style="font-size: 16px; vertical-align: middle;">add</span>
                   Добавить мем
                 </button>
-              </div>
-
-              <div class="tab-pane fade" id="tab-meme">
-                <div class="mb-3">
-                  <label class="form-label">URL изображения</label>
-                  <input type="text" class="form-control" id="item-meme-url" placeholder="https://...">
-                </div>
-                <div class="text-center">
-                  <label class="form-label d-block mb-2">Быстрые мемы:</label>
-                  <div class="btn-group flex-wrap gap-1 mb-2" id="quick-memes-container">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="selectMeme('https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh')">Meme</button>
-                  </div>
-                  <button type="button" class="btn btn-primary btn-sm" onclick="openAddMemeModal()">
-                    <span class="material-icons" style="font-size: 16px; vertical-align: middle;">add</span>
-                    Добавить мем
-                  </button>
-                </div>
               </div>
 
               <div class="tab-pane fade" id="tab-emoji">
@@ -605,6 +583,32 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
           <button type="button" class="btn btn-danger" id="confirm-delete-meme-btn">Удалить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно редактирования заголовка колонки -->
+  <div class="modal fade" id="editColumnModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <span class="material-icons me-2">edit</span>
+            Редактировать заголовок
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="edit-column-category">
+          <div class="mb-3">
+            <label class="form-label">Название колонки</label>
+            <input type="text" class="form-control" id="edit-column-title" placeholder="Введите название" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-primary" onclick="saveColumnTitle()">Сохранить</button>
         </div>
       </div>
     </div>

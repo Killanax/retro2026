@@ -148,6 +148,124 @@ app.patch('/api/sessions/:id/columns', async (req, res) => {
   }
 });
 
+// Изменить порядок столбцов (для админа)
+app.post('/api/sessions/:id/columns/reorder', async (req, res) => {
+  const { fromCategory, toCategory } = req.body;
+  const sessionId = req.params.id;
+
+  console.log('[Reorder] Request:', { sessionId, fromCategory, toCategory });
+
+  try {
+    // Получаем текущую сессию
+    const sessionResult = await pool.query('SELECT * FROM sessions WHERE id = $1', [sessionId]);
+    const session = sessionResult.rows[0];
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    console.log('[Reorder] Session template:', session.template, 'template_columns:', session.template_columns);
+
+    // Стандартные шаблоны
+    const TEMPLATES = {
+      'classic': [
+        { id: null, name: '🚀 Начать делать', category: 'start' },
+        { id: null, name: '🛑 Перестать делать', category: 'stop' },
+        { id: null, name: '✅ Продолжать делать', category: 'continue' }
+      ],
+      'mad-sad-glad': [
+        { id: null, name: '😡 Злит', category: 'mad' },
+        { id: null, name: '😢 Расстраивает', category: 'sad' },
+        { id: null, name: '😄 Радует', category: 'glad' }
+      ],
+      'good-bad-ideas': [
+        { id: null, name: '👍 Хорошо', category: 'good' },
+        { id: null, name: '👎 Плохо', category: 'bad' },
+        { id: null, name: '💡 Идеи', category: 'ideas' }
+      ],
+      'kiss': [
+        { id: null, name: '📌 Keep (Сохранить)', category: 'keep' },
+        { id: null, name: '🔧 Improve (Улучшить)', category: 'improve' },
+        { id: null, name: '🚀 Start (Начать)', category: 'start' },
+        { id: null, name: '🛑 Stop (Прекратить)', category: 'stop' }
+      ],
+      'sailboat': [
+        { id: null, name: '💨 Ветер (Что помогает)', category: 'wind' },
+        { id: null, name: '⚓ Якорь (Что мешает)', category: 'anchor' },
+        { id: null, name: '🪨 Скалы (Риски)', category: 'rocks' },
+        { id: null, name: '🏝️ Остров (Цель)', category: 'island' }
+      ],
+      'freeform': [
+        { id: null, name: '📝 Общее', category: 'general' }
+      ]
+    };
+
+    // Получаем или инициализируем template_columns
+    let templateColumns = session.template_columns && session.template_columns.trim() !== ''
+      ? JSON.parse(session.template_columns)
+      : (TEMPLATES[session.template] || TEMPLATES['classic']);
+
+    console.log('[Reorder] Parsed templateColumns:', templateColumns);
+
+    // Находим индексы
+    const fromIndex = templateColumns.findIndex(col => col.category === fromCategory);
+    const toIndex = templateColumns.findIndex(col => col.category === toCategory);
+
+    console.log('[Reorder] Indices:', { fromIndex, toIndex });
+
+    if (fromIndex === -1 || toIndex === -1) {
+      console.error('Column not found:', { fromCategory, toCategory, templateColumns });
+      return res.status(400).json({ error: 'Column not found' });
+    }
+
+    // Перемещаем элемент
+    const [movedColumn] = templateColumns.splice(fromIndex, 1);
+    templateColumns.splice(toIndex, 0, movedColumn);
+
+    console.log('[Reorder] New order:', templateColumns);
+
+    // Сохраняем в БД
+    await pool.query(
+      'UPDATE sessions SET template_columns = $1 WHERE id = $2',
+      [JSON.stringify(templateColumns), sessionId]
+    );
+
+    // Отправляем событие всем клиентам
+    io.to(sessionId).emit('columns:reordered', {
+      columns: templateColumns
+    });
+
+    res.json({ success: true, columns: templateColumns });
+  } catch (err) {
+    console.error('Error reordering columns:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Сохранить template_columns (для пользовательских колонок)
+app.patch('/api/sessions/:id/template-columns', async (req, res) => {
+  const { template_columns } = req.body;
+  const sessionId = req.params.id;
+
+  try {
+    await pool.query(
+      'UPDATE sessions SET template_columns = $1 WHERE id = $2',
+      [template_columns, sessionId]
+    );
+
+    // Отправляем событие всем клиентам - используем columns:reordered для обновления порядка
+    const columns = JSON.parse(template_columns);
+    io.to(sessionId).emit('columns:reordered', {
+      columns: columns
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error saving template_columns:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Получить все идеи сессии
 app.get('/api/sessions/:id/items', async (req, res) => {
   try {
@@ -364,6 +482,20 @@ app.delete('/api/sessions/:id/columns/:category', async (req, res) => {
       'UPDATE sessions SET column_headers = $1 WHERE id = $2',
       [JSON.stringify(columnHeaders), sessionId]
     );
+
+    // Удаляем колонку из template_columns
+    if (session.template_columns && session.template_columns.trim() !== '') {
+      try {
+        let templateColumns = JSON.parse(session.template_columns);
+        templateColumns = templateColumns.filter(col => col.category !== category);
+        await pool.query(
+          'UPDATE sessions SET template_columns = $1 WHERE id = $2',
+          [JSON.stringify(templateColumns), sessionId]
+        );
+      } catch (e) {
+        console.error('Error parsing template_columns on delete:', e);
+      }
+    }
 
     // Удаляем все карточки из этой колонки
     await pool.query('DELETE FROM items WHERE session_id = $1 AND category = $2', [sessionId, category]);
@@ -786,27 +918,102 @@ app.get('/api/sessions/:id/mood/:userId', async (req, res) => {
 
 // ==================== WebSocket ====================
 
-// Хранилище таймеров по сессиям
+// Хранилище таймеров по сессиям (кэш, основное хранение в БД)
 const sessionTimers = new Map();
 // Хранилище участников по сессиям
 const sessionParticipants = new Map();
+// Хранилище состояния голосования по сессиям
+const sessionStates = new Map();
+
+// Загрузка таймеров из БД при старте сервера
+async function loadTimersFromDb() {
+  try {
+    const result = await pool.query(`
+      SELECT id, timer_seconds, timer_started_at, timer_running 
+      FROM sessions 
+      WHERE status = 'active' AND (timer_seconds IS NOT NULL OR timer_started_at IS NOT NULL)
+    `);
+    
+    result.rows.forEach(row => {
+      if (row.timer_seconds !== null) {
+        sessionTimers.set(row.id, {
+          seconds: row.timer_seconds,
+          running: row.timer_running || false,
+          startedAt: row.timer_started_at ? new Date(row.timer_started_at).getTime() : null
+        });
+      }
+    });
+    
+    console.log(`[Timer] Loaded ${result.rows.length} timer(s) from database`);
+  } catch (err) {
+    console.error('[Timer] Error loading timers from database:', err.message);
+  }
+}
+
+// Сохранение таймера в БД
+async function saveTimerToDb(sessionId, timer) {
+  try {
+    await pool.query(`
+      UPDATE sessions 
+      SET timer_seconds = $1, timer_started_at = $2, timer_running = $3
+      WHERE id = $4
+    `, [
+      timer.seconds,
+      timer.startedAt ? new Date(timer.startedAt).toISOString() : null,
+      timer.running,
+      sessionId
+    ]);
+  } catch (err) {
+    console.error('[Timer] Error saving timer to database:', err.message);
+  }
+}
+
+// Загружаем таймеры при старте
+loadTimersFromDb();
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('join', (sessionId) => {
     socket.join(sessionId);
-    console.log(`[WS] User ${socket.id} joined session ${sessionId}`);
+    const now = Date.now();
+    console.log(`[WS] User ${socket.id} joined session ${sessionId} at ${now}`);
 
-    // Отправляем текущее состояние таймера
+    // Отправляем текущее состояние таймера с учётом прошедшего времени
     const timer = sessionTimers.get(sessionId);
+    console.log(`[Timer] Join - session ${sessionId}, timer:`, timer, 'current time:', now);
     if (timer) {
-      socket.emit('timer:update', timer);
+      let remainingSeconds = timer.seconds;
+      // Если таймер запущен, вычисляем оставшееся время
+      if (timer.running && timer.startedAt) {
+        const elapsed = Math.floor((now - timer.startedAt) / 1000);
+        remainingSeconds = Math.max(0, timer.seconds - elapsed);
+        console.log(`[Timer] Running - startedAt: ${timer.startedAt}, elapsed: ${elapsed}s, original seconds: ${timer.seconds}, remaining: ${remainingSeconds}s`);
+      } else {
+        console.log(`[Timer] Not running or no startedAt - running: ${timer.running}, startedAt: ${timer.startedAt}`);
+      }
+      socket.emit('timer:update', {
+        seconds: remainingSeconds,
+        running: timer.running
+      });
+      console.log(`[Timer] Sent to client:`, { seconds: remainingSeconds, running: timer.running });
+    } else {
+      console.log(`[Timer] No timer found for session ${sessionId}`);
     }
 
     // Отправляем список участников
     const participants = sessionParticipants.get(sessionId) || [];
     socket.emit('participants:list', participants);
+
+    // Отправляем состояние голосования (если сессия существует)
+    const session = sessionStates.get(sessionId);
+    if (session) {
+      socket.emit('vote:mode', {
+        voteMode: session.voteMode || false,
+        sessionEnded: session.sessionEnded || false
+      });
+      console.log(`[Vote] Sent vote mode to client: voteMode=${session.voteMode}, sessionEnded=${session.sessionEnded}`);
+    }
   });
 
   socket.on('participant:join', (data) => {
@@ -842,27 +1049,48 @@ io.on('connection', (socket) => {
   });
 
   // Таймер
-  socket.on('timer:start', (data) => {
+  socket.on('timer:start', async (data) => {
     const { sessionId, seconds } = data;
-    sessionTimers.set(sessionId, { seconds, running: true });
-    io.to(sessionId).emit('timer:started', { seconds });
-    console.log(`Timer started in session ${sessionId}: ${seconds}s`);
+    // Сохраняем время запуска таймера и оставшиеся секунды
+    const timerData = {
+      seconds,
+      running: true,
+      startedAt: Date.now()
+    };
+    sessionTimers.set(sessionId, timerData);
+    // Сохраняем в БД
+    await saveTimerToDb(sessionId, timerData);
+    io.to(sessionId).emit('timer:started', { seconds, startedAt: Date.now() });
+    console.log(`[Timer] Started in session ${sessionId}:`, timerData);
   });
 
-  socket.on('timer:stop', (data) => {
+  socket.on('timer:stop', async (data) => {
     const { sessionId } = data;
     const timer = sessionTimers.get(sessionId);
+    console.log(`[Timer] Stop - session ${sessionId}, current timer:`, timer);
     if (timer) {
       timer.running = false;
+      // Вычисляем оставшиеся секунды на основе прошедшего времени
+      if (timer.startedAt) {
+        const elapsed = Math.floor((Date.now() - timer.startedAt) / 1000);
+        timer.seconds = Math.max(0, timer.seconds - elapsed);
+        console.log(`[Timer] Stop - elapsed: ${elapsed}s, new seconds: ${timer.seconds}`);
+      }
+      timer.startedAt = null;
       sessionTimers.set(sessionId, timer);
+      // Сохраняем в БД
+      await saveTimerToDb(sessionId, timer);
     }
     io.to(sessionId).emit('timer:stopped');
     console.log(`Timer stopped in session ${sessionId}`);
   });
 
-  socket.on('timer:reset', (data) => {
+  socket.on('timer:reset', async (data) => {
     const { sessionId } = data;
-    sessionTimers.set(sessionId, { seconds: 0, running: false });
+    const timerData = { seconds: 0, running: false, startedAt: null };
+    sessionTimers.set(sessionId, timerData);
+    // Сохраняем в БД
+    await saveTimerToDb(sessionId, timerData);
     io.to(sessionId).emit('timer:reset');
     console.log(`Timer reset in session ${sessionId}`);
   });
@@ -912,6 +1140,15 @@ io.on('connection', (socket) => {
   // Режим голосования
   socket.on('vote:mode', (data) => {
     const { sessionId, voteMode, sessionEnded } = data;
+    
+    // Сохраняем в сессии
+    if (!sessionStates.has(sessionId)) {
+      sessionStates.set(sessionId, {});
+    }
+    const session = sessionStates.get(sessionId);
+    session.voteMode = voteMode;
+    session.sessionEnded = sessionEnded;
+    
     io.in(sessionId).emit('vote:mode', { voteMode, sessionEnded });
     console.log(`Vote mode updated in session ${sessionId}: voteMode=${voteMode}, sessionEnded=${sessionEnded}`);
   });

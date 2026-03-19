@@ -3,6 +3,7 @@ let socket;
 let currentSession = null;
 let currentUserId = null;
 let isAdmin = false;
+let isViewOnly = false; // Режим только для просмотра (из истории)
 let userReactions = {}; // { itemId: reactionName } - реакция пользователя на каждой карточке
 let participants = new Map();
 let timerInterval = null;
@@ -271,6 +272,9 @@ function checkPassword() {
       const tab = new bootstrap.Tab(createTab);
       tab.show();
     }
+
+    // Обновляем список активных сессий
+    checkActiveSession();
 
     showToast('Доступ разрешён. Вы администратор.', 'success');
   } else {
@@ -565,6 +569,8 @@ function initSocket() {
   });
 
   socket.on('session:ended', (data) => {
+    sessionEnded = true;
+    saveSession();
     showToast('Сессия завершена!', 'success');
     // Очищаем localStorage после завершения сессии
     localStorage.removeItem('retroSession');
@@ -592,11 +598,29 @@ function initSocket() {
     if (voteMode) {
       votingStarted = true;
     }
-    // Если сессия завершена (нажали "Стоп") - показываем чекбоксы
+    // Если сессия завершена (sessionEnded = true) - показываем чекбоксы
     if (data.sessionEnded) {
       sessionEnded = true;
+      saveSession();
       document.getElementById('session-tabs').style.display = 'flex';
       // Перерисовываем карточки с чекбоксами - обновляем каждую карточку
+      document.querySelectorAll('.retro-item').forEach(itemEl => {
+        const itemId = itemEl.dataset.id;
+        const item = currentSession?.items?.find(i => i.id === itemId);
+        if (item) {
+          const newHtml = createItemHtml(item);
+          const tempDiv = document.createElement('div');
+          tempDiv.innerHTML = newHtml;
+          const newItemEl = tempDiv.firstElementChild;
+          if (newItemEl) {
+            itemEl.replaceWith(newItemEl);
+            initDraggable(newItemEl);
+          }
+        }
+      });
+    } else if (!voteMode && votingStarted && isAdmin) {
+      // Если голосование выключено (нажат "СТОП") - показываем чекбоксы админу
+      // Перерисовываем карточки с чекбоксами
       document.querySelectorAll('.retro-item').forEach(itemEl => {
         const itemId = itemEl.dataset.id;
         const item = currentSession?.items?.find(i => i.id === itemId);
@@ -783,12 +807,18 @@ function initSocket() {
 
   // Таймер
   socket.on('timer:update', (data) => {
+    console.log('[Timer] Received update:', data);
     timerSeconds = data.seconds;
     timerRunning = data.running;
+    // Если таймер запущен, запускаем интервал
+    if (timerRunning) {
+      startTimerInterval();
+    }
     updateTimerDisplay();
   });
-  
+
   socket.on('timer:started', (data) => {
+    console.log('[Timer] Started:', data);
     timerSeconds = data.seconds;
     timerRunning = true;
     startTimerInterval();
@@ -833,7 +863,7 @@ function initSocket() {
         columnHeaders[col.category] = col.name;
       });
       currentSession.column_headers = JSON.stringify(columnHeaders);
-      
+
       // Обновляем customColumns - это критически важно для синхронизации
       const standardCategories = ['start', 'stop', 'continue', 'mad', 'sad', 'glad', 'good', 'bad', 'ideas', 'keep', 'improve', 'wind', 'anchor', 'rocks', 'island', 'general'];
       currentSession.customColumns = data.columns
@@ -843,10 +873,33 @@ function initSocket() {
           name: col.name,
           category: col.category
         }));
-      
+
       // Перерисовываем колонки и добавляем карточки
       renderColumns();
       renderColumnsForBrainstorm();
+    }
+  });
+
+  // Обработчик изменения порядка столбцов
+  socket.on('columns:reordered', (data) => {
+    console.log('[WS] Columns reordered:', data);
+    if (currentSession) {
+      // Обновляем порядок в template_columns
+      currentSession.template_columns = JSON.stringify(data.columns);
+
+      // Сохраняем в localStorage
+      saveSession();
+
+      // Перерисовываем колонки и добавляем карточки
+      renderColumns();
+      renderColumnsForBrainstorm();
+
+      // Перераспределяем карточки по новым колонкам
+      if (currentSession.items) {
+        currentSession.items.forEach(item => {
+          addItemToColumn(item);
+        });
+      }
     }
   });
 
@@ -858,23 +911,34 @@ function initSocket() {
       if (currentSession.customColumns) {
         currentSession.customColumns = currentSession.customColumns.filter(col => col.category !== data.category);
       }
-      
+
       // Удаляем из column_headers
       if (currentSession.column_headers) {
         const columnHeaders = JSON.parse(currentSession.column_headers);
         delete columnHeaders[data.category];
         currentSession.column_headers = JSON.stringify(columnHeaders);
       }
-      
+
+      // Удаляем из template_columns
+      if (currentSession.template_columns && currentSession.template_columns.trim() !== '') {
+        try {
+          let templateColumns = JSON.parse(currentSession.template_columns);
+          templateColumns = templateColumns.filter(col => col.category !== data.category);
+          currentSession.template_columns = JSON.stringify(templateColumns);
+        } catch (e) {
+          console.error('Error parsing template_columns on delete:', e);
+        }
+      }
+
       // Удаляем карточки этой категории из items
       if (currentSession.items) {
         currentSession.items = currentSession.items.filter(item => item.category !== data.category);
       }
-      
+
       // Перерисовываем колонки и добавляем карточки
       renderColumns();
       renderColumnsForBrainstorm();
-      
+
       showToast('Колонка удалена', 'info');
     }
   });
@@ -891,7 +955,7 @@ function sendJoinToSession(sessionId) {
     return;
   }
 
-  console.log('[WS] Emitting join for session', sessionId, 'isAdmin:', isAdmin);
+  console.log('[WS] Emitting join for session', sessionId, 'isAdmin:', isAdmin, 'socket.connected:', socket?.connected);
   socket.emit('join', sessionId);
   console.log('[WS] Emitting participant:join for session', sessionId, 'userId:', currentUserId, 'isAdmin:', isAdmin);
   socket.emit('participant:join', {
@@ -1085,6 +1149,9 @@ async function restoreSession() {
       // Восстанавливаем флаги голосования и завершения сессии
       sessionEnded = data.sessionEnded || false;
       votingStarted = data.votingStarted || false;
+      
+      // Сбрасываем joinSent, чтобы при подключении сокета отправился join
+      joinSent = false;
 
       // Проверяем статус сессии через API
       try {
@@ -1118,8 +1185,9 @@ async function restoreSession() {
         });
       }
 
-      // Отправляем join если сокет подключён
+      // Отправляем join если сокет подключён - это запросит состояние таймера у сервера
       if (socket?.connected) {
+        console.log('[WS] Sending join after restore to get timer state');
         sendJoinToSession(currentSession.id);
       }
 
@@ -1219,14 +1287,17 @@ async function returnToSession(sessionId) {
     const sessionResponse = await fetch(`/api/sessions/${sessionId}`);
     const session = await sessionResponse.json();
 
-    // Очищаем состояние предыдущей сессии перед загрузкой новой
+    // Сбрасываем состояние предыдущей сессии
     currentSession = null;
+    currentUserId = null;
+    isAdmin = false;
     selectedDiscussionItems.clear();
     userReactions = {};
     voteModeVotes = {};
     userVoteModeVotes = [];
     participants.clear();
     addedItems.clear();
+    joinSent = false; // Сбрасываем флаг join для новой сессии
 
     // Очищаем DOM от карточек предыдущей сессии
     document.querySelectorAll('.column-items').forEach(col => {
@@ -1240,40 +1311,31 @@ async function returnToSession(sessionId) {
     // Всегда устанавливаем currentSession
     currentSession = session;
 
-    // Восстанавливаем сессию из localStorage если есть
-    const saved = localStorage.getItem('retroSession');
-    if (saved) {
-      try {
-        const data = JSON.parse(saved);
-        if (data.isAdmin && data.userId) {
-          currentUserId = data.userId;
-          isAdmin = data.isAdmin;
-        }
-      } catch (e) {
-        console.error('Error restoring session:', e);
-      }
-    }
+    // Проверяем, является ли текущий пользователь админом этой сессии
+    const adminNames = JSON.parse(localStorage.getItem('retroAdminNames') || '[]');
+    const isSessionAdmin = adminNames.includes(session.admin_name);
+    // Проверяем, разблокирована ли вкладка "Создать" (пользователь ввёл пароль)
+    const isCreateTabUnlocked = localStorage.getItem('isAdmin') === 'true';
 
-    // Если нет сохранённых данных, проверяем, является ли пользователь админом этой сессии
-    if (!currentUserId) {
-      // Проверяем, является ли текущий пользователь админом этой сессии
-      const adminNames = JSON.parse(localStorage.getItem('retroAdminNames') || '[]');
-      const isSessionAdmin = adminNames.includes(session.admin_name);
-
-      if (isSessionAdmin) {
-        // Восстанавливаем статус админа
-        isAdmin = true;
-        currentUserId = 'admin_' + session.admin_name;
-        // Сохраняем флаг админа
-        localStorage.setItem('isAdmin', 'true');
-        console.log('[returnToSession] Restored admin status from adminNames');
-      } else {
-        // Если не админ, заходим как обычный пользователь
-        isAdmin = false;
-        // Генерируем ID пользователя
-        const userName = prompt('Введите ваше имя для участия в сессии:', '') || 'Аноним';
-        currentUserId = 'user_' + userName;
+    if (isSessionAdmin || isCreateTabUnlocked) {
+      // Восстанавливаем статус админа
+      // Если вкладка разблокирована, используем admin_name из сессии
+      isAdmin = true;
+      currentUserId = 'admin_' + session.admin_name;
+      // Сохраняем флаг админа и имя админа
+      localStorage.setItem('isAdmin', 'true');
+      if (isCreateTabUnlocked && !isSessionAdmin) {
+        // Добавляем имя админа в список для будущих проверок
+        adminNames.push(session.admin_name);
+        localStorage.setItem('retroAdminNames', JSON.stringify(adminNames));
       }
+      console.log('[returnToSession] Entering session as admin:', session.admin_name);
+    } else {
+      // Если не админ, заходим как обычный пользователь
+      isAdmin = false;
+      // Генерируем ID пользователя
+      const userName = prompt('Введите ваше имя для участия в сессии:', '') || 'Аноним';
+      currentUserId = 'user_' + userName;
     }
 
     // Сохраняем текущую сессию в localStorage
@@ -1430,14 +1492,15 @@ async function loadSessionData() {
     const sessionData = await response.json();
     hideOthersCards = sessionData.hide_others_cards || false;
     hideOthersVotes = sessionData.hide_others_votes || false;
-    
+
     // Загружаем column_headers и инициализируем customColumns
+    let columnHeaders = {};
     if (sessionData.column_headers) {
-      const columnHeaders = JSON.parse(sessionData.column_headers);
+      columnHeaders = JSON.parse(sessionData.column_headers);
       // Инициализируем customColumns из column_headers (для кастомных колонок)
       currentSession.column_headers = sessionData.column_headers;
       currentSession.customColumns = currentSession.customColumns || [];
-      
+
       // Для каждого заголовка, которого нет в стандартных шаблонах, создаём customColumn
       const standardCategories = ['start', 'stop', 'continue', 'mad', 'sad', 'glad', 'good', 'bad', 'ideas', 'keep', 'improve', 'wind', 'anchor', 'rocks', 'island', 'general'];
       Object.keys(columnHeaders).forEach(category => {
@@ -1449,6 +1512,44 @@ async function loadSessionData() {
           });
         }
       });
+    }
+
+    // Загружаем template_columns (порядок колонок)
+    if (sessionData.template_columns && sessionData.template_columns.trim() !== '') {
+      try {
+        currentSession.template_columns = sessionData.template_columns;
+      } catch (e) {
+        console.error('Error parsing template_columns:', e);
+      }
+    }
+
+    // Если есть кастомные колонки, но их нет в template_columns, добавляем их
+    if (currentSession.customColumns && currentSession.customColumns.length > 0) {
+      try {
+        let templateColumns = [];
+        if (currentSession.template_columns && currentSession.template_columns.trim() !== '') {
+          templateColumns = JSON.parse(currentSession.template_columns);
+        } else {
+          // Если template_columns пуст, инициализируем из шаблона
+          const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
+          templateColumns = [...template.columns];
+        }
+
+        // Добавляем кастомные колонки, если их нет
+        currentSession.customColumns.forEach(customCol => {
+          if (!templateColumns.find(c => c.category === customCol.category)) {
+            templateColumns.push({
+              id: customCol.id,
+              name: customCol.name,
+              category: customCol.category
+            });
+          }
+        });
+
+        currentSession.template_columns = JSON.stringify(templateColumns);
+      } catch (e) {
+        console.error('Error adding custom columns to template_columns:', e);
+      }
     }
 
     // Обновляем чекбоксы
@@ -1705,15 +1806,28 @@ async function loadVoteModeVotes() {
 // Рендер колонок
 function renderColumns() {
   const container = document.getElementById('columns-container');
-  const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
-
+  
   container.className = `col template-${currentSession.template}`;
 
   // Получаем кастомные заголовки из сессии
   const columnHeaders = currentSession.column_headers ? JSON.parse(currentSession.column_headers) : {};
 
-  // Объединяем стандартные колонки шаблона с пользовательскими
-  const allColumns = [...template.columns];
+  // Получаем колонки из template_columns или из шаблона по умолчанию
+  let allColumns = [];
+  if (currentSession.template_columns && currentSession.template_columns.trim() !== '') {
+    try {
+      allColumns = JSON.parse(currentSession.template_columns);
+    } catch (e) {
+      console.error('Error parsing template_columns:', e);
+      const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
+      allColumns = [...template.columns];
+    }
+  } else {
+    const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
+    allColumns = [...template.columns];
+  }
+
+  // Добавляем кастомные колонки если их нет в template_columns
   if (currentSession.customColumns) {
     currentSession.customColumns.forEach(customCol => {
       // Проверяем, нет ли уже такой колонки
@@ -1759,11 +1873,14 @@ function renderColumns() {
         <span class="material-icons">delete</span>
       </button>` : '';
 
+    // Drag-n-drop для столбцов (только для админа)
+    const columnDragAttrs = isAdmin ? `draggable="true" ondragstart="handleColumnStartDrag(event, '${col.category}')" ondragover="handleColumnReorderDragOver(event, '${col.category}')" ondragleave="handleColumnReorderDragLeave(event)" ondrop="handleColumnReorderDrop(event, '${col.category}')"` : '';
+
     return `
-      <div class="retro-column column-${index + 1}" data-category="${col.category}" ${dragAttrs}>
+      <div class="retro-column column-${index + 1}" data-category="${col.category}" data-column-id="${col.id || ''}" ${columnDragAttrs} ${dragAttrs}>
         <div class="column-header">
           <h5 class="column-title">
-            <span class="material-icons">label</span>
+            <span class="material-icons">drag_indicator</span>
             ${columnHeader}
             ${editButton}
             ${deleteButton}
@@ -1794,27 +1911,46 @@ function renderColumns() {
 // Открытие модального окна добавления
 function openAddItemModal(category) {
   document.getElementById('item-category').value = category;
-  document.getElementById('item-text').value = '';
-  document.getElementById('item-meme-url').value = '';
-  document.getElementById('item-emoji').value = '';
-  document.getElementById('emoji-preview').style.display = 'none';
   
+  const textField = document.getElementById('item-text');
+  const memeUrlField = document.getElementById('item-meme-url');
+  const emojiField = document.getElementById('item-emoji');
+  const emojiPreview = document.getElementById('emoji-preview');
+  
+  if (textField) textField.value = '';
+  if (memeUrlField) memeUrlField.value = '';
+  if (emojiField) emojiField.value = '';
+  if (emojiPreview) emojiPreview.style.display = 'none';
+
   document.querySelectorAll('.emoji-btn').forEach(btn => btn.classList.remove('selected'));
   document.querySelectorAll('.meme-preview').forEach(img => img.classList.remove('selected'));
-  
+
   document.querySelectorAll('#addItemModal .nav-link').forEach(l => l.classList.remove('active'));
   document.querySelectorAll('#addItemModal .tab-pane').forEach(p => {
     p.classList.remove('show', 'active');
   });
-  
+
   const firstTab = document.querySelector('[data-bs-target="#tab-text"]');
   if (firstTab) {
     firstTab.classList.add('active');
     document.getElementById('tab-text').classList.add('show', 'active');
   }
-  
-  const modal = new bootstrap.Modal(document.getElementById('addItemModal'));
+
+  const modalElement = document.getElementById('addItemModal');
+  const modal = new bootstrap.Modal(modalElement);
   modal.show();
+
+  // Перерендериваем мемы при открытии модального окна
+  const defaultMeme = { name: 'Meme', url: 'https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh' };
+  const allMemes = [defaultMeme, ...globalMemes, ...sessionMemes, ...customMemes];
+  renderTextTabMemes(allMemes);
+
+  // Устанавливаем фокус на текстовое поле после показа модального окна
+  modalElement.addEventListener('shown.bs.modal', function () {
+    if (textField) {
+      textField.focus();
+    }
+  }, { once: true });
 }
 
 // Открытие модального окна редактирования заголовка колонки
@@ -2212,13 +2348,19 @@ function selectEmoji(emoji) {
 
 // Отправка элемента
 async function submitItem() {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    showToast('Режим только для просмотра', 'warning');
+    return;
+  }
+
   const category = document.getElementById('item-category').value;
   const itemTextDiv = document.getElementById('item-text');
   const memeUrlInput = document.getElementById('item-meme-url');
   const emojiInput = document.getElementById('item-emoji');
 
-  const memeUrl = memeUrlInput.value.trim();
-  const emoji = emojiInput.value;
+  const memeUrl = memeUrlInput ? memeUrlInput.value.trim() : '';
+  const emoji = emojiInput ? emojiInput.value : '';
 
   // Получаем HTML и текст из contenteditable div
   const htmlContent = itemTextDiv.innerHTML.trim();
@@ -2241,21 +2383,23 @@ async function submitItem() {
   if (imageUrls.length > 0) {
     type = 'meme';
     memeUrlToSend = imageUrls[0];
-    
+
     // Сохраняем текст + markdown изображения
     // Сначала заменяем <br> на \n
     let markdownContent = htmlContent.replace(/<br\s*\/?>/gi, '\n');
-    
+
+    // Сохраняем разделитель объединённых карточек перед удалением HTML тегов
+    markdownContent = markdownContent.replace(/<hr[^>]*class="item-divider"[^>]*>/gi, '\n\n─────────────\n\n');
+
     // Заменяем все img на markdown с правильным форматом
     markdownContent = markdownContent
       .replace(/<img[^>]+src="([^"]+)"[^>]*alt="([^"]*)"[^>]*>/g, '![$2]($1)')
       .replace(/<img[^>]+src="([^"]+)"[^>]*>/g, '![Мем]($1)');
-    
+
     // Удаляем остальные HTML теги, сохраняя markdown
     content = markdownContent
       .replace(/<[^>]+>/g, '') // Удаляем все HTML теги
       .replace(/&nbsp;/g, ' ')
-      .replace(/\n\s*\n/g, '\n') // Удаляем пустые строки
       .trim();
   } else if (memeUrl) {
     // Если выбран мем во вкладке "Мем"
@@ -2356,8 +2500,8 @@ async function submitItem() {
     // Очищаем форму
     itemTextDiv.innerHTML = '';
     itemTextDiv.innerText = '';
-    memeUrlInput.value = '';
-    emojiInput.value = '';
+    if (memeUrlInput) memeUrlInput.value = '';
+    if (emojiInput) emojiInput.value = '';
     document.getElementById('emoji-preview').style.display = 'none';
     document.querySelectorAll('.emoji-btn').forEach(btn => btn.classList.remove('selected'));
 
@@ -2387,8 +2531,6 @@ function addItemToColumn(item) {
 
   console.log('[UI] Adding item to column:', { id: item.id, category: item.category, text: item.text?.substring(0, 50), author: item.author });
 
-  updateColumnCount(item.category);
-
   const itemHtml = createItemHtml(item);
   column.insertAdjacentHTML('beforeend', itemHtml);
 
@@ -2400,6 +2542,8 @@ function addItemToColumn(item) {
     applyViewSettings();
     // Применяем режим голосования (показываем кнопки голосования если есть голоса)
     applyVoteMode();
+    // Обновляем счётчик после добавления элемента
+    updateColumnCount(item.category);
   } else {
     console.error('[UI] Failed to find added element:', item.id);
   }
@@ -2491,6 +2635,9 @@ function selectActionPlanItem(itemId) {
 // Сохранение плана действий
 let saveActionPlanTimeout = null;
 async function saveActionPlan(itemId, field = 'text', value = null, realtime = false) {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) return;
+
   if (saveActionPlanTimeout && !realtime) {
     clearTimeout(saveActionPlanTimeout);
   }
@@ -2883,13 +3030,15 @@ function createItemHtml(item) {
   const isMerged = item.text && item.text.includes('─────────────');
   const mergedBadge = isMerged ? `<span class="merged-badge" title="Объединённая карточка (можно разъединить)"><span class="material-icons" style="font-size: 12px;">call_merge</span></span>` : '';
 
-  // Проверяем, может ли пользователь редактировать карточку (создатель или админ)
-  const canEdit = isAdmin || (currentUserId && currentUserId.replace(/^(admin_|user_)/, '') === author);
+  // Проверяем, может ли пользователь редактировать карточку
+  // Для объединённых карточек - только админ, для обычных - создатель или админ
+  const canEdit = isAdmin || (!isMerged && currentUserId && currentUserId.replace(/^(admin_|user_)/, '') === author);
 
-  // Чекбокс для обсуждения (показывается после завершения сессии)
-  const discussionCheckbox = sessionEnded ? `
+  // Чекбокс для обсуждения (показывается после завершения сессии ИЛИ после выключения голосования для админа)
+  const showDiscussionCheckbox = sessionEnded || (isAdmin && votingStarted && !voteMode);
+  const discussionCheckbox = showDiscussionCheckbox ? `
     <label class="discussion-checkbox" title="Добобавить в обсуждение">
-      <input type="checkbox" class="form-check-input" data-item-id="${item.id}" 
+      <input type="checkbox" class="form-check-input" data-item-id="${item.id}"
              ${selectedDiscussionItems.has(item.id) ? 'checked' : ''}
              onchange="toggleDiscussionItem('${item.id}')">
       <span class="material-icons" style="font-size: 16px;">forum</span>
@@ -3083,10 +3232,6 @@ function createDiscussionItemHtml(item) {
   return `
     <div class="retro-item discussion-item-only" data-id="${item.id}" data-order="${item.order || 0}" data-category="${item.category || ''}">
       <div class="retro-item-header">
-        <div class="category-badge-full" title="Категория: ${escapeHtml(item.category || '')}">
-          <span class="material-icons" style="font-size: 24px;">label</span>
-          <strong style="font-size: 18px;">${getCategoryName(item.category)}</strong>
-        </div>
         <span class="retro-item-author">
           <span class="material-icons" style="font-size: 14px;">person</span>
           ${escapeHtml(author)}
@@ -3238,7 +3383,7 @@ let shouldGroupItems = false;
 
 // Инициализация drag-n-drop (только для админа)
 function initDraggable(element) {
-  if (!isAdmin) return;
+  if (!isAdmin || isViewOnly) return;
 
   element.setAttribute('draggable', 'true');
   element.addEventListener('dragstart', handleDragStart);
@@ -3418,6 +3563,12 @@ function restoreMemeSizes() {
 }
 
 function handleDragStart(e) {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    e.preventDefault();
+    return;
+  }
+
   // Не разрешаем drag если мем в режиме редактирования
   const editingMeme = this.querySelector('.retro-item-meme.editing');
   if (editingMeme) {
@@ -3513,6 +3664,13 @@ function showGroupingPreview(targetItem) {
 }
 
 function handleItemDrop(e) {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
+
   e.preventDefault();
   e.stopPropagation();
   this.classList.remove('drag-over-item');
@@ -3561,6 +3719,89 @@ function handleItemDrop(e) {
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ DRAG-N-DROP ====================
 
+// Переменные для drag-n-drop столбцов
+let draggedColumnCategory = null;
+let draggedColumnElement = null;
+
+// Обработчики для перетаскивания столбцов (смена порядка)
+function handleColumnStartDrag(e, category) {
+  e.stopPropagation();
+  draggedColumnCategory = category;
+  draggedColumnElement = e.currentTarget;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', category);
+  // Добавляем класс для визуализации
+  const element = e.currentTarget;
+  setTimeout(() => {
+    if (element) element.classList.add('dragging-column');
+  }, 0);
+  
+  // Добавляем обработчик dragend для снятия выделения
+  e.currentTarget.addEventListener('dragend', function dragEndHandler() {
+    if (draggedColumnElement) {
+      draggedColumnElement.classList.remove('dragging-column');
+    }
+    draggedColumnCategory = null;
+    draggedColumnElement = null;
+    e.currentTarget.removeEventListener('dragend', dragEndHandler);
+  });
+}
+
+function handleColumnReorderDragOver(e, category) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (draggedColumnCategory && draggedColumnCategory !== category) {
+    e.dataTransfer.dropEffect = 'move';
+    if (e.currentTarget) e.currentTarget.classList.add('drag-over-column');
+  }
+  return false;
+}
+
+function handleColumnReorderDragLeave(e, category) {
+  e.stopPropagation();
+  if (e.currentTarget) e.currentTarget.classList.remove('drag-over-column');
+}
+
+async function handleColumnReorderDrop(e, targetCategory) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.currentTarget) e.currentTarget.classList.remove('drag-over-column');
+
+  if (!draggedColumnCategory || draggedColumnCategory === targetCategory) {
+    draggedColumnCategory = null;
+    draggedColumnElement = null;
+    return;
+  }
+
+  // Меняем порядок столбцов
+  try {
+    const response = await fetch(`/api/sessions/${currentSession.id}/columns/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fromCategory: draggedColumnCategory,
+        toCategory: targetCategory
+      })
+    });
+
+    if (response.ok) {
+      // Столбцы будут переупорядочены через WebSocket событие columns:reordered
+    } else {
+      const error = await response.json();
+      alert('Ошибка: ' + error.error);
+    }
+  } catch (err) {
+    console.error('Error reordering columns:', err);
+  }
+
+  // Очищаем
+  if (draggedColumnElement) {
+    draggedColumnElement.classList.remove('dragging-column');
+  }
+  draggedColumnCategory = null;
+  draggedColumnElement = null;
+}
+
 // Обработчики для колонки
 function handleColumnDragOver(e, category) {
   e.preventDefault();
@@ -3585,18 +3826,18 @@ function handleButtonDragOver(e) {
   e.preventDefault();
   e.stopPropagation();
   e.dataTransfer.dropEffect = 'move';
-  this.classList.add('drag-over');
+  if (e.currentTarget) e.currentTarget.classList.add('drag-over');
 }
 
 function handleButtonDragLeave(e) {
   e.stopPropagation();
-  this.classList.remove('drag-over');
+  if (e.currentTarget) e.currentTarget.classList.remove('drag-over');
 }
 
 function handleDropOnButton(e, category) {
   e.preventDefault();
   e.stopPropagation();
-  this.classList.remove('drag-over');
+  if (e.currentTarget) e.currentTarget.classList.remove('drag-over');
 
   if (!draggedItemId || !category) return;
 
@@ -3696,6 +3937,12 @@ function moveItemToCategory(itemId, category) {
 
 // Обмен местами двух карточек в одной колонке
 async function swapItems(sourceElement, targetElement) {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    showToast('Режим только для просмотра', 'warning');
+    return;
+  }
+
   const sourceId = sourceElement.dataset.id;
   const targetId = targetElement.dataset.id;
 
@@ -3758,6 +4005,12 @@ async function swapItems(sourceElement, targetElement) {
 
 // Объединение двух карточек
 async function mergeItems(sourceElement, targetElement) {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    showToast('Режим только для просмотра', 'warning');
+    return;
+  }
+
   // Проверяем, было ли начато голосование в этой сессии
   if (votingStarted) {
     showToast('Объединение карточек недоступно после начала голосования', 'warning');
@@ -3922,6 +4175,9 @@ async function mergeItems(sourceElement, targetElement) {
 
 // Переключение реакции (старая функция для совместимости)
 async function toggleReaction(itemId, emoji, reactionName) {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) return;
+
   if (!currentSession) return;
 
   // Проверяем, есть ли уже реакция у пользователя на этой карточке
@@ -3954,6 +4210,12 @@ async function toggleReaction(itemId, emoji, reactionName) {
 // Разъединение карточки (разделение на отдельные карточки)
 // Открывает модальное окно для выбора какой фрагмент отделить
 async function splitItem(itemId) {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    showToast('Режим только для просмотра', 'warning');
+    return;
+  }
+
   // Проверяем, было ли начато голосование в этой сессии
   if (votingStarted) {
     showToast('Разъединение карточек недоступно после начала голосования', 'warning');
@@ -3978,8 +4240,8 @@ async function splitItem(itemId) {
       return;
     }
 
-    // Разделяем текст по разделителю
-    const parts = item.text.split(/\n\n─────────────\n\n/).filter(p => p.trim());
+    // Разделяем текст по разделителю (поддерживаем разные форматы)
+    const parts = item.text.split(/\n{1,2}─────────────\n{1,2}/).filter(p => p.trim());
 
     if (parts.length < 2) {
       showToast('Нечего разъединять', 'info');
@@ -4424,8 +4686,6 @@ function updateItemInColumn(item) {
     // Перемещаем в другую колонку
     const newColumn = document.getElementById(`column-${item.category}`);
     if (newColumn) {
-      // Сначала обновляем счётчики
-      updateColumnCount(currentCategory);
       // Перемещаем элемент в новую колонку
       newColumn.appendChild(element);
       // Обновляем содержимое элемента
@@ -4437,7 +4697,8 @@ function updateItemInColumn(item) {
       initDraggable(newElement);
       // Сортируем колонку по порядку
       sortColumnByOrder(item.category);
-      // Обновляем счётчик новой колонки
+      // Обновляем счётчики обеих колонок после перемещения
+      updateColumnCount(currentCategory);
       updateColumnCount(item.category);
       console.log('[UI] Moved element from', currentCategory, 'to', item.category);
       // Восстанавливаем размер мема если есть
@@ -4586,61 +4847,110 @@ async function editItem(itemId) {
     return;
   }
 
-  // Заполняем форму редактирования
-  const itemTextDiv = document.getElementById('item-text');
-  const categorySelect = document.getElementById('item-category');
-  const memeUrlInput = document.getElementById('item-meme-url');
-  const emojiInput = document.getElementById('item-emoji');
-
-  // Очищаем форму
-  itemTextDiv.innerHTML = '';
-  memeUrlInput.value = '';
-  emojiInput.value = '';
-  document.getElementById('emoji-preview').style.display = 'none';
-
-  // Если это мем с картинкой
-  if (item.type === 'meme' && item.text) {
-    // Проверяем, есть ли в тексте markdown изображения
-    const imgMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
-    if (imgMatch) {
-      // Вставляем изображение в contenteditable
-      const imgHtml = `<img src="${imgMatch[2]}" alt="${imgMatch[1]}" style="max-width: 200px; max-height: 150px; border-radius: 6px; margin: 4px; vertical-align: middle;">`;
-      itemTextDiv.innerHTML = imgHtml;
-      
-      // Если есть текст до изображения
-      const textBefore = item.text.split(imgMatch[0])[0];
-      if (textBefore) {
-        itemTextDiv.innerHTML = textBefore.replace(/\n/g, '<br>') + imgHtml;
-      }
-    } else if (item.meme_url) {
-      // Просто URL мема
-      const imgHtml = `<img src="${item.meme_url}" alt="Meme" style="max-width: 200px; max-height: 150px; border-radius: 6px; margin: 4px; vertical-align: middle;">`;
-      itemTextDiv.innerHTML = imgHtml;
-    }
-  } else if (item.type === 'emoji') {
-    emojiInput.value = item.text;
-    document.getElementById('emoji-preview-text').textContent = item.text;
-    document.getElementById('emoji-preview').style.display = 'block';
-  } else {
-    // Текст - просто вставляем
-    itemTextDiv.innerText = item.text;
-  }
-
-  // Устанавливаем категорию
-  categorySelect.value = item.category;
-
-  // Открываем модальное окно
+  // Открываем модальное окно сначала
   const modal = new bootstrap.Modal(document.getElementById('addItemModal'));
   modal.show();
 
-  // Сохраняем ID редактируемого элемента для обновления
-  itemTextDiv.dataset.editItemId = itemId;
+  // Ждём пока модальное окно откроется
+  document.getElementById('addItemModal').addEventListener('shown.bs.modal', function initEditModal() {
+    // Заполняем форму редактирования
+    const itemTextDiv = document.getElementById('item-text');
+    const categorySelect = document.getElementById('item-category');
+    const memeUrlInput = document.getElementById('item-meme-url');
+    const emojiInput = document.getElementById('item-emoji');
+    const submitButton = document.querySelector('#addItemModal .btn-primary');
+
+    // Очищаем форму
+    if (itemTextDiv) itemTextDiv.innerHTML = '';
+    if (memeUrlInput) memeUrlInput.value = '';
+    if (emojiInput) emojiInput.value = '';
+    
+    const emojiPreview = document.getElementById('emoji-preview');
+    if (emojiPreview) emojiPreview.style.display = 'none';
+
+    // Если это мем с картинкой или объединённая карточка
+    if (item.type === 'meme' && item.text) {
+      // Проверяем, есть ли в тексте markdown изображения
+      const imgMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
+      if (imgMatch) {
+        // Вставляем изображение в contenteditable
+        const imgHtml = `<img src="${imgMatch[2]}" alt="${imgMatch[1]}" style="max-width: 200px; max-height: 150px; border-radius: 6px; margin: 4px; vertical-align: middle;">`;
+        if (itemTextDiv) {
+          // Разделяем текст на части до и после изображения
+          const parts = item.text.split(imgMatch[0]);
+          const textBefore = parts[0] || '';
+          const textAfter = parts[1] || '';
+          
+          // Формируем HTML: текст до + изображение + текст после
+          let contentHtml = '';
+          if (textBefore) {
+            contentHtml += textBefore.replace(/\n/g, '<br>');
+          }
+          contentHtml += imgHtml;
+          if (textAfter) {
+            contentHtml += textAfter.replace(/\n/g, '<br>');
+          }
+          itemTextDiv.innerHTML = contentHtml;
+        }
+      } else if (item.meme_url) {
+        // Просто URL мема
+        const imgHtml = `<img src="${item.meme_url}" alt="Meme" style="max-width: 200px; max-height: 150px; border-radius: 6px; margin: 4px; vertical-align: middle;">`;
+        if (itemTextDiv) itemTextDiv.innerHTML = imgHtml;
+      }
+    } else if (item.type === 'emoji') {
+      if (emojiInput) emojiInput.value = item.text;
+      const previewText = document.getElementById('emoji-preview-text');
+      if (previewText) previewText.textContent = item.text;
+      if (emojiPreview) emojiPreview.style.display = 'block';
+    } else {
+      // Текст - вставляем с обработкой переносов строк и разделителей
+      if (itemTextDiv) {
+        // Проверяем, есть ли разделитель объединённых карточек
+        if (item.text && item.text.includes('─────────────')) {
+          // Заменяем разделитель на HTML для отображения
+          itemTextDiv.innerHTML = item.text
+            .replace(/\n/g, '<br>')
+            .replace(/─────────────/g, '<hr class="item-divider" style="border: 2px dashed #ccc; margin: 10px 0;">');
+        } else {
+          itemTextDiv.innerText = item.text;
+        }
+      }
+    }
+
+    // Устанавливаем категорию
+    if (categorySelect) categorySelect.value = item.category;
+
+    // Сохраняем ID редактируемого элемента для обновления
+    if (itemTextDiv) itemTextDiv.dataset.editItemId = itemId;
+
+    // Меняем текст кнопки на "Сохранить"
+    if (submitButton) {
+      submitButton.textContent = 'Сохранить';
+    }
+
+    // При закрытии модального окна сбрасываем текст кнопки
+    document.getElementById('addItemModal').addEventListener('hidden.bs.modal', function() {
+      if (submitButton) {
+        submitButton.textContent = 'Добавить';
+      }
+      if (itemTextDiv) delete itemTextDiv.dataset.editItemId;
+    }, { once: true });
+
+    // Удаляем этот обработчик после выполнения
+    document.getElementById('addItemModal').removeEventListener('shown.bs.modal', initEditModal);
+  }, { once: true });
 }
 
 // Удаление элемента (для админа)
 async function deleteItem(itemId) {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    showToast('Режим только для просмотра', 'warning');
+    return;
+  }
+
   if (!confirm('Удалить этот элемент?')) return;
-  
+
   try {
     await fetch(`/api/sessions/${currentSession.id}/items/${itemId}`, {
       method: 'DELETE'
@@ -4711,6 +5021,12 @@ function toggleHideOthersVotes(checked) {
 
 // Переключение режима голосования
 function toggleVoteMode() {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    showToast('Режим только для просмотра', 'warning');
+    return;
+  }
+
   voteMode = !voteMode;
 
   // Если включаем голосование - устанавливаем флаг (блокировка объединения/разъединения)
@@ -4718,31 +5034,13 @@ function toggleVoteMode() {
     votingStarted = true;
   }
 
-  // Если выключаем голосование (нажали "Стоп") - показываем чекбоксы для обсуждения
+  // Если выключаем голосование - показываем чекбоксы админу для выбора карточек
   if (!voteMode && votingStarted) {
-    sessionEnded = true;
-    // Сохраняем в localStorage
-    saveSession();
-    // Показываем вкладки
-    document.getElementById('session-tabs').style.display = 'flex';
-
-    // Синхронизируем selectedDiscussionItems с currentSession.items
-    selectedDiscussionItems.clear();
-    if (currentSession?.items) {
-      currentSession.items.forEach(item => {
-        if (item.for_discussion) {
-          selectedDiscussionItems.add(item.id);
-        }
-      });
-    }
-    updateDiscussionCount();
-
-    // Перерисовываем карточки с чекбоксами - обновляем каждую карточку
+    // Перерисовываем карточки с чекбоксами
     document.querySelectorAll('.retro-item').forEach(itemEl => {
       const itemId = itemEl.dataset.id;
       const item = currentSession?.items?.find(i => i.id === itemId);
       if (item) {
-        // Заменяем HTML карточки на новый с чекбоксом
         const newHtml = createItemHtml(item);
         const tempDiv = document.createElement('div');
         tempDiv.innerHTML = newHtml;
@@ -4755,6 +5053,14 @@ function toggleVoteMode() {
     });
   }
 
+  // Сохраняем в localStorage
+  saveSession();
+
+  // Показываем вкладки если голосование было начато
+  if (votingStarted) {
+    document.getElementById('session-tabs').style.display = 'flex';
+  }
+
   // НЕ сбрасываем голоса при выключении - они остаются видимыми
   // if (!voteMode) {
   //   voteModeVotes = {};
@@ -4765,7 +5071,7 @@ function toggleVoteMode() {
   socket.emit('vote:mode', {
     sessionId: currentSession.id,
     voteMode,
-    sessionEnded: !voteMode && votingStarted // Отправляем флаг завершения для клиентов
+    sessionEnded: false // sessionEnded = true только при завершении сессии
   });
   applyVoteMode();
   showToast(voteMode ? 'Режим голосования включён' : 'Режим голосования выключен', 'info');
@@ -4833,8 +5139,30 @@ function addCustomColumn() {
     category: customColumnId
   });
 
+  // Добавляем колонку в template_columns
+  if (!currentSession.template_columns || currentSession.template_columns.trim() === '') {
+    // Если template_columns пустой, инициализируем из шаблона
+    const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
+    currentSession.template_columns = JSON.stringify([...template.columns]);
+  }
+
+  try {
+    let templateColumns = JSON.parse(currentSession.template_columns);
+    templateColumns.push({
+      id: customColumnId,
+      name: 'Дополнительно',
+      category: customColumnId
+    });
+    currentSession.template_columns = JSON.stringify(templateColumns);
+  } catch (e) {
+    console.error('Error parsing template_columns:', e);
+  }
+
   // Сохраняем в БД через column_headers
   saveCustomColumnsToDB();
+
+  // Сохраняем в localStorage
+  saveSession();
 
   // Перерисовываем колонки и добавляем карточки
   renderColumns();
@@ -4862,7 +5190,7 @@ async function saveCustomColumnsToDB() {
     }
 
     // Сохраняем в БД - передаём id для custom колонок
-    const response = await fetch(`/api/sessions/${currentSession.id}/columns`, {
+    const columnsResponse = await fetch(`/api/sessions/${currentSession.id}/columns`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -4877,10 +5205,21 @@ async function saveCustomColumnsToDB() {
       })
     });
 
-    const result = await response.json();
-    if (result.success) {
+    const columnsResult = await columnsResponse.json();
+    if (columnsResult.success) {
       // Обновляем column_headers в текущей сессии
       currentSession.column_headers = JSON.stringify(columnHeaders);
+    }
+
+    // Сохраняем template_columns
+    if (currentSession.template_columns) {
+      await fetch(`/api/sessions/${currentSession.id}/template-columns`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template_columns: currentSession.template_columns
+        })
+      });
     }
   } catch (error) {
     console.error('Error saving custom columns:', error);
@@ -4952,6 +5291,12 @@ function renderColumnsForBrainstorm() {
 
 // Переключение карточки для обсуждения
 async function toggleDiscussionItem(itemId) {
+  // Блокируем выбор карточек после начала голосования (кроме админа после выключения голосования)
+  if (votingStarted && !sessionEnded && !(isAdmin && !voteMode)) {
+    showToast('Выбор карточек заблокирован после начала голосования', 'warning');
+    return;
+  }
+
   const isSelected = !selectedDiscussionItems.has(itemId);
 
   if (isSelected) {
@@ -5026,13 +5371,17 @@ function renderDiscussionTab() {
   // Находим выбранные карточки в currentSession.items
   // Используем Set для предотвращения дублирования
   const renderedItemIds = new Set();
-  const discussionItems = [];
+  const discussionItemsByCategory = {};
 
   if (currentSession?.items) {
     currentSession.items.forEach(item => {
       // Проверяем что карточка выбрана для обсуждения и ещё не была добавлена
       if (selectedDiscussionItems.has(item.id) && !renderedItemIds.has(item.id)) {
-        discussionItems.push(item);
+        const category = item.category || 'general';
+        if (!discussionItemsByCategory[category]) {
+          discussionItemsByCategory[category] = [];
+        }
+        discussionItemsByCategory[category].push(item);
         renderedItemIds.add(item.id);
       }
     });
@@ -5047,81 +5396,153 @@ function renderDiscussionTab() {
     }
   });
 
-  if (discussionItems.length === 0) {
+  // Проверяем есть ли карточки
+  const totalItems = Object.values(discussionItemsByCategory).reduce((sum, items) => sum + items.length, 0);
+  if (totalItems === 0) {
     container.innerHTML = '<p class="text-muted text-center">Выбранные карточки не найдены</p>';
     return;
   }
 
-  // Сортируем по порядку
-  discussionItems.sort((a, b) => (a.order || 0) - (b.order || 0));
+  // Получаем порядок колонок из template_columns
+  let columnOrder = [];
+  if (currentSession?.template_columns && currentSession.template_columns.trim() !== '') {
+    try {
+      columnOrder = JSON.parse(currentSession.template_columns);
+    } catch (e) {
+      console.error('Error parsing template_columns:', e);
+    }
+  }
+  
+  // Если нет template_columns, используем шаблон по умолчанию
+  if (columnOrder.length === 0) {
+    const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
+    columnOrder = [...template.columns];
+  }
 
-  // Создаём обёртку для каждой карточки с планом действий справа
-  container.innerHTML = discussionItems.map(item => `
-    <div class="discussion-item-wrapper" data-item-id="${item.id}">
-      <div class="discussion-item-card" data-item-id="${item.id}">
-        ${createDiscussionItemHtml(item)}
-      </div>
-      <div class="discussion-item-plan">
-        <div class="action-plan-section">
-          <div class="action-plan-header">
-            <span class="material-icons" style="font-size: 16px;">assignment</span>
-            <strong>План действий</strong>
+  // Получаем кастомные заголовки
+  const columnHeaders = currentSession?.column_headers ? JSON.parse(currentSession.column_headers) : {};
+
+  // Сортируем категории по порядку колонок
+  const sortedCategories = columnOrder.map(col => col.category).filter(cat => discussionItemsByCategory[cat]);
+  
+  // Добавляем категории которых нет в columnOrder (если есть)
+  Object.keys(discussionItemsByCategory).forEach(cat => {
+    if (!sortedCategories.includes(cat)) {
+      sortedCategories.push(cat);
+    }
+  });
+
+  // Рендерим карточки по категориям
+  let html = '';
+  sortedCategories.forEach(category => {
+    const items = discussionItemsByCategory[category];
+    if (!items || items.length === 0) return;
+
+    // Получаем название колонки
+    // 1. Сначала пробуем взять из column_headers (кастомные заголовки)
+    // 2. Затем из template_columns (оригинальное название из шаблона)
+    // 3. Затем из getCategoryName (дефолтное название)
+    let columnHeader = columnHeaders[category];
+    
+    if (!columnHeader && columnOrder.length > 0) {
+      const colFromTemplate = columnOrder.find(col => col.category === category);
+      if (colFromTemplate && colFromTemplate.name) {
+        columnHeader = colFromTemplate.name;
+      }
+    }
+    
+    if (!columnHeader) {
+      columnHeader = getCategoryName(category);
+    }
+
+    // Сортируем items по порядку
+    items.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    html += `
+      <div class="discussion-category-section" data-category="${category}">
+        <div class="column-header">
+          <h5 class="column-title">${columnHeader}</h5>
+          <span class="column-badge">${items.length}</span>
+        </div>
+        <div class="discussion-category-items">
+    `;
+
+    items.forEach(item => {
+      html += `
+        <div class="discussion-item-wrapper" data-item-id="${item.id}">
+          <div class="discussion-item-card" data-item-id="${item.id}">
+            ${createDiscussionItemHtml(item)}
           </div>
-          <div class="action-plan-toolbar" id="toolbar-${item.id}">
-            <button class="toolbar-btn" type="button" onclick="formatActionPlan('${item.id}', 'bold')" title="Жирный">
-              <span class="material-icons">format_bold</span>
-            </button>
-            <button class="toolbar-btn" type="button" onclick="formatActionPlan('${item.id}', 'italic')" title="Курсив">
-              <span class="material-icons">format_italic</span>
-            </button>
-            <button class="toolbar-btn" type="button" onclick="formatActionPlan('${item.id}', 'underline')" title="Подчёркнутый">
-              <span class="material-icons">format_underlined</span>
-            </button>
-            <button class="toolbar-btn reset-btn" type="button" onclick="resetActionPlanFormat('${item.id}')" title="Сбросить форматирование">
-              <span class="material-icons">format_clear</span>
-            </button>
-            <select class="toolbar-select" onchange="formatActionPlan('${item.id}', 'fontName', this.value)" title="Шрифт">
-              <option value="Arial">Arial</option>
-              <option value="Times New Roman">Times New Roman</option>
-              <option value="Courier New">Courier New</option>
-              <option value="Georgia">Georgia</option>
-              <option value="Verdana">Verdana</option>
-            </select>
-            <select class="toolbar-select" onchange="formatActionPlan('${item.id}', 'fontSize', this.value)" title="Размер">
-              <option value="1">Маленький</option>
-              <option value="3" selected>Средний</option>
-              <option value="5">Большой</option>
-              <option value="7">Огромный</option>
-            </select>
-            <input type="color" class="toolbar-color" onchange="formatActionPlan('${item.id}', 'foreColor', this.value)" title="Цвет текста" value="#000000">
-          </div>
-          <div class="action-plan-editor" contenteditable="true"
-               data-item-id="${item.id}"
-               oninput="saveActionPlan('${item.id}', 'text', null, false)"
-               onblur="handleActionPlanBlur('${item.id}')"
-               placeholder="Введите план действий...">${item.action_plan_text || ''}</div>
-          <div class="action-plan-fields">
-            <div class="action-plan-field">
-              <label><span class="material-icons" style="font-size: 14px;">person</span> Кому:</label>
-              <input type="text" class="form-control form-control-sm"
-                     data-item-id="${item.id}"
-                     value="${escapeHtml(item.action_plan_who || '')}"
-                     onblur="handleActionPlanWhoBlur(event, '${item.id}')"
-                     placeholder="ФИО ответственного">
-            </div>
-            <div class="action-plan-field">
-              <label><span class="material-icons" style="font-size: 14px;">event</span> Когда:</label>
-              <input type="text" class="form-control form-control-sm"
-                     data-item-id="${item.id}"
-                     value="${escapeHtml(item.action_plan_when || '')}"
-                     onblur="handleActionPlanWhenBlur(event, '${item.id}')"
-                     placeholder="Срок выполнения">
+          <div class="discussion-item-plan">
+            <div class="action-plan-section">
+              <div class="action-plan-header">
+                <span class="material-icons" style="font-size: 16px;">assignment</span>
+                <strong>План действий</strong>
+              </div>
+              <div class="action-plan-toolbar" id="toolbar-${item.id}">
+                <button class="toolbar-btn" type="button" onclick="formatActionPlan('${item.id}', 'bold')" title="Жирный">
+                  <span class="material-icons">format_bold</span>
+                </button>
+                <button class="toolbar-btn" type="button" onclick="formatActionPlan('${item.id}', 'italic')" title="Курсив">
+                  <span class="material-icons">format_italic</span>
+                </button>
+                <button class="toolbar-btn" type="button" onclick="formatActionPlan('${item.id}', 'underline')" title="Подчёркнутый">
+                  <span class="material-icons">format_underlined</span>
+                </button>
+                <button class="toolbar-btn reset-btn" type="button" onclick="resetActionPlanFormat('${item.id}')" title="Сбросить форматирование">
+                  <span class="material-icons">format_clear</span>
+                </button>
+                <select class="toolbar-select" onchange="formatActionPlan('${item.id}', 'fontName', this.value)" title="Шрифт">
+                  <option value="Arial">Arial</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                  <option value="Courier New">Courier New</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Verdana">Verdana</option>
+                </select>
+                <select class="toolbar-select" onchange="formatActionPlan('${item.id}', 'fontSize', this.value)" title="Размер">
+                  <option value="1">Маленький</option>
+                  <option value="3" selected>Средний</option>
+                  <option value="5">Большой</option>
+                  <option value="7">Огромный</option>
+                </select>
+                <input type="color" class="toolbar-color" onchange="formatActionPlan('${item.id}', 'foreColor', this.value)" title="Цвет текста" value="#000000">
+              </div>
+              <div class="action-plan-editor" contenteditable="true"
+                   data-item-id="${item.id}"
+                   oninput="saveActionPlan('${item.id}', 'text', null, false)"
+                   onblur="handleActionPlanBlur('${item.id}')"
+                   placeholder="Введите план действий...">${item.action_plan_text || ''}</div>
+              <div class="action-plan-fields">
+                <div class="action-plan-field">
+                  <label><span class="material-icons" style="font-size: 14px;">person</span> Кому:</label>
+                  <input type="text" class="form-control form-control-sm"
+                         data-item-id="${item.id}"
+                         value="${escapeHtml(item.action_plan_who || '')}"
+                         onblur="handleActionPlanWhoBlur(event, '${item.id}')"
+                         placeholder="ФИО ответственного">
+                </div>
+                <div class="action-plan-field">
+                  <label><span class="material-icons" style="font-size: 14px;">event</span> Когда:</label>
+                  <input type="text" class="form-control form-control-sm"
+                         data-item-id="${item.id}"
+                         value="${escapeHtml(item.action_plan_when || '')}"
+                         onblur="handleActionPlanWhenBlur(event, '${item.id}')"
+                         placeholder="Срок выполнения">
+                </div>
+              </div>
             </div>
           </div>
         </div>
+      `;
+    });
+
+    html += `
+        </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  });
+
+  container.innerHTML = html;
 
   // Инициализируем drag-n-drop для карточек
   container.querySelectorAll('.retro-item').forEach(item => {
@@ -5407,6 +5828,7 @@ function applyVoteMode() {
         voteBtn.classList.remove('active');
       }
 
+      // Кнопки активны только когда режим голосования включён
       if (voteMode) {
         voteBtn.style.display = 'flex';
         voteBtn.style.pointerEvents = 'auto'; // Разрешаем клики
@@ -5427,7 +5849,11 @@ function applyVoteMode() {
 
 // Быстрое голосование (крупный лайк)
 function quickVote(itemId) {
-  if (!voteMode) return;
+  // Голосование разрешено только когда активен режим голосования (voteMode === true)
+  if (!voteMode) {
+    showToast('Голосование остановлено админом', 'warning');
+    return;
+  }
 
   // Проверяем, использовал ли уже голос на этой карточке
   const alreadyVoted = userVoteModeVotes.includes(itemId);
@@ -5520,13 +5946,14 @@ function renderTimer() {
 function updateTimerDisplay() {
   const timeEl = document.getElementById('timer-time');
   const display = document.getElementById('timer-display');
-  
+
   if (!timeEl) return;
-  
+
   const mins = Math.floor(timerSeconds / 60);
   const secs = timerSeconds % 60;
   timeEl.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-  
+  console.log('[Timer] Display updated:', { timerSeconds, timerRunning, display: `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}` });
+
   if (timerRunning) {
     display?.classList.add('timer-running');
   } else {
@@ -5535,33 +5962,52 @@ function updateTimerDisplay() {
 }
 
 function startTimer() {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    showToast('Режим только для просмотра', 'warning');
+    return;
+  }
+
   if (!isAdmin) return;
-  
+
   const minutes = parseInt(document.getElementById('timer-minutes')?.value) || 5;
   if (timerSeconds === 0) {
     timerSeconds = minutes * 60;
   }
-  
+
   socket.emit('timer:start', { sessionId: currentSession.id, seconds: timerSeconds });
 }
 
 function stopTimer() {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    showToast('Режим только для просмотра', 'warning');
+    return;
+  }
+
   if (!isAdmin) return;
   socket.emit('timer:stop', { sessionId: currentSession.id });
 }
 
 function resetTimer() {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    showToast('Режим только для просмотра', 'warning');
+    return;
+  }
+
   if (!isAdmin) return;
   socket.emit('timer:reset', { sessionId: currentSession.id });
 }
 
 function startTimerInterval() {
   stopTimerInterval();
+  console.log('[Timer] Starting interval with seconds:', timerSeconds, 'running:', timerRunning);
   timerInterval = setInterval(() => {
     if (timerRunning && timerSeconds > 0) {
       timerSeconds--;
       updateTimerDisplay();
-      
+
       if (timerSeconds === 0) {
         socket.emit('timer:finished', { sessionId: currentSession.id });
         showToast('Время вышло!', 'warning');
@@ -5583,29 +6029,66 @@ function stopTimerInterval() {
 
 function updateParticipantsList() {
   const container = document.getElementById('participants-list');
-  if (!container) return;
+  const countInline = document.getElementById('participants-count-inline');
   
+  if (!container) return;
+
+  // Обновляем цифру в заголовке
+  if (countInline) {
+    countInline.textContent = participants.size;
+  }
+
   if (participants.size === 0) {
     container.innerHTML = '<span class="text-muted">Нет участников</span>';
     return;
   }
-  
-  container.innerHTML = Array.from(participants.values()).map(p => `
-    <div class="participant-badge">
-      <div class="participant-avatar">${p.name.charAt(0).toUpperCase()}</div>
-      ${escapeHtml(p.name)}
+
+  // Цвета для аватаров участников
+  const avatarColors = [
+    'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+    'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+    'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+    'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
+    'linear-gradient(135deg, #30cfd0 0%, #330867 100%)',
+    'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
+    'linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%)',
+    'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
+    'linear-gradient(135deg, #ff6e7f 0%, #bfe9ff 100%)'
+  ];
+
+  container.innerHTML = `
+    <div class="participants-avatars">
+      ${Array.from(participants.values()).map((p, index) => `
+        <div class="participant-badge">
+          <div class="participant-avatar" style="background: ${avatarColors[index % avatarColors.length]}">${p.name.charAt(0).toUpperCase()}</div>
+          ${escapeHtml(p.name)}
+        </div>
+      `).join('')}
     </div>
-  `).join('');
+  `;
 }
 
 // Завершение сессии
 function endSession() {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    showToast('Режим только для просмотра', 'warning');
+    return;
+  }
+
   const modal = new bootstrap.Modal(document.getElementById('endSessionModal'));
   modal.show();
 }
 
 // Подтверждение завершения
 async function confirmEndSession() {
+  // Блокируем в режиме просмотра
+  if (isViewOnly) {
+    showToast('Режим только для просмотра', 'warning');
+    return;
+  }
+
   // Сохраняем все планы действий перед завершением
   await saveAllActionPlans();
 
@@ -5615,6 +6098,10 @@ async function confirmEndSession() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ summary: '', actionItems: [] })
     });
+
+    // Устанавливаем флаг завершения сессии
+    sessionEnded = true;
+    saveSession();
 
     bootstrap.Modal.getInstance(document.getElementById('endSessionModal')).hide();
     // Очищаем localStorage после завершения сессии
@@ -6428,29 +6915,35 @@ async function openSessionViewMode(sessionId) {
   try {
     const response = await fetch(`/api/sessions/${sessionId}`);
     const session = await response.json();
-    
+
     // Сохраняем текущую сессию если есть
     const prevSession = currentSession;
     const prevUserId = currentUserId;
     const prevIsAdmin = isAdmin;
-    
+
     // Устанавливаем сессию для просмотра
     currentSession = session;
     currentUserId = 'viewer_' + sessionId; // Временный ID для просмотра
     isAdmin = false;
-    
+    isViewOnly = true; // Включаем режим только для просмотра
+
     // Показываем страницу сессии
     showSessionPage();
-    
+
     // Загружаем данные
     await loadSessionData();
-    
+
     // Блокируем редактирование
     document.getElementById('admin-panel-btn').style.display = 'none';
     document.getElementById('end-session-btn').style.display = 'none';
     document.getElementById('admin-view-controls').style.display = 'none';
     document.getElementById('vote-mode-btn').style.display = 'none';
-    
+    // Скрываем форму добавления карточек
+    const addItemForm = document.getElementById('add-item-form');
+    if (addItemForm) addItemForm.style.display = 'none';
+    // Скрываем кнопку очистки категории
+    document.querySelectorAll('.clear-category-btn').forEach(btn => btn.style.display = 'none');
+
     // Добавляем кнопку экспорта в режим просмотра
     const exportBtn = document.createElement('button');
     exportBtn.className = 'btn btn-outline-light btn-sm me-2';
@@ -6481,6 +6974,7 @@ async function openSessionViewMode(sessionId) {
       currentSession = prevSession;
       currentUserId = prevUserId;
       isAdmin = prevIsAdmin;
+      isViewOnly = false;
       goHome();
     };
 
@@ -6495,7 +6989,7 @@ async function openSessionViewMode(sessionId) {
         header.insertBefore(backBtn, header.firstChild);
       }
     }
-    
+
     showToast('Режим просмотра завершённой сессии', 'info');
   } catch (error) {
     console.error('Error opening session view:', error);
@@ -6640,6 +7134,9 @@ function showSessionPage() {
   if (userDisplay) {
     userDisplay.style.display = isAdmin ? 'none' : 'inline';
   }
+  
+  // Сразу обновляем список участников
+  updateParticipantsList();
 }
 
 // Вернуться домой
@@ -6664,6 +7161,7 @@ function goHome(clearStorage = false) {
 
   currentSession = null;
   isAdmin = false;
+  isViewOnly = false;
   userReactions = {};
   voteModeVotes = {};
   userVoteModeVotes = [];

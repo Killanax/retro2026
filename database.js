@@ -99,12 +99,24 @@ async function createTables(client) {
       summary TEXT,
       action_items TEXT,
       vote_limit INTEGER DEFAULT 5,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      ended_at TIMESTAMP,
       column_headers TEXT,
+      created_by_user_id TEXT,
+      is_admin_session BOOLEAN DEFAULT false,
       hide_others_cards BOOLEAN DEFAULT false,
       hide_others_votes BOOLEAN DEFAULT false,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      ended_at TIMESTAMP
+      template_columns TEXT,
+      timer_seconds INTEGER,
+      timer_started_at TIMESTAMP,
+      timer_running BOOLEAN DEFAULT false
     )
+  `);
+
+  // Добавляем поле template_columns если его нет (для старых баз)
+  await client.query(`
+    ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS template_columns TEXT
   `);
 
   // Таблица элементов (идеи, мемы, смайлы)

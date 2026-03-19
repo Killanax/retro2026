@@ -558,6 +558,37 @@ body {
   overflow: visible;
 }
 
+/* Drag-n-drop для столбцов (смена порядка) */
+.retro-column.dragging-column {
+  opacity: 0.5;
+  transform: scale(1.05);
+  box-shadow: var(--shadow-2xl);
+  border: 3px dashed var(--primary-color);
+}
+
+.retro-column.drag-over-column {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.15) 100%);
+  border: 3px dashed var(--primary-color);
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2), var(--shadow-lg);
+  transform: scale(1.03);
+}
+
+/* Иконка drag-indicator в заголовке */
+.column-title .material-icons:first-child {
+  cursor: grab;
+  opacity: 0.3;
+  transition: opacity var(--transition-fast);
+  user-select: none;
+}
+
+.column-title:hover .material-icons:first-child {
+  opacity: 0.7;
+}
+
+.column-title:active .material-icons:first-child {
+  cursor: grabbing;
+}
+
 .retro-column::before {
   content: '';
   position: absolute;
@@ -708,43 +739,49 @@ body {
 .btn-edit-column {
   padding: 6px;
   cursor: pointer;
-  opacity: 0.5;
+  opacity: 1;
   transition: all var(--transition-fast);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
+  background-color: rgba(99, 102, 241, 0.2);
 }
 
 .btn-edit-column:hover {
   opacity: 1;
-  background-color: rgba(99, 102, 241, 0.1);
+  background-color: rgba(99, 102, 241, 0.3);
+  transform: scale(1.1);
 }
 
 .btn-edit-column .material-icons {
   font-size: 18px;
-  color: #64748b;
+  color: #6366f1;
+  filter: brightness(1.5);
 }
 
 .btn-delete-column {
   padding: 6px;
   cursor: pointer;
-  opacity: 0.5;
+  opacity: 1;
   transition: all var(--transition-fast);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
+  background-color: rgba(239, 68, 68, 0.2);
 }
 
 .btn-delete-column:hover {
   opacity: 1;
-  background-color: rgba(239, 68, 68, 0.1);
+  background-color: rgba(239, 68, 68, 0.3);
+  transform: scale(1.1);
 }
 
 .btn-delete-column .material-icons {
   font-size: 18px;
   color: #ef4444;
+  filter: brightness(1.5);
 }
 
 .column-badge {
@@ -1465,7 +1502,7 @@ body {
   align-items: center;
   flex-shrink: 0;
   min-width: max-content;
-  margin: 0 auto;
+  margin: 0 80px 0 0;
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
   backdrop-filter: blur(10px);
@@ -1678,6 +1715,7 @@ body {
   box-shadow: var(--shadow-md);
   transition: all var(--transition-fast);
   border: 1px solid #e2e8f0;
+  margin-left: 8px;
 }
 
 .participant-badge:hover {
@@ -1689,6 +1727,34 @@ body {
   background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
   border: 1px solid #fbbf24;
   box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
+}
+
+.participants-count-badge {
+  display: none; /* Скрываем старый бейдж */
+}
+
+.participants-count-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 2px 8px;
+  margin-left: 8px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+  border-radius: var(--radius-full);
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.participants-avatars {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .participant-avatar {
@@ -2308,6 +2374,21 @@ body {
 /* Карточка в обсуждении - скрываем встроенный план действий */
 .discussion-item .action-plan-section {
   display: none;
+}
+
+/* Секции категорий в обсуждении */
+.discussion-category-section {
+  margin-bottom: 32px;
+}
+
+.discussion-category-section:last-child {
+  margin-bottom: 0;
+}
+
+.discussion-category-items {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 /* Контейнер обсуждения с ручкой для изменения размера */
