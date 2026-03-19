@@ -2633,6 +2633,62 @@ function selectActionPlanItem(itemId) {
 
 // Сохранение плана действий
 let saveActionPlanTimeout = null;
+
+// Сохранение плана действий в localStorage для резервного копирования
+function saveActionPlanToLocalStorage(itemId, data) {
+  if (!currentSession) return;
+  
+  const storageKey = `actionPlan_${currentSession.id}_${itemId}`;
+  const saveData = {
+    action_plan_text: data.action_plan_text || '',
+    action_plan_who: data.action_plan_who || '',
+    action_plan_when: data.action_plan_when || '',
+    savedAt: Date.now()
+  };
+  localStorage.setItem(storageKey, JSON.stringify(saveData));
+  console.log('[ActionPlan Local] Saved to localStorage:', storageKey);
+}
+
+// Восстановление плана действий из localStorage
+function restoreActionPlanFromLocalStorage(itemId) {
+  if (!currentSession) return null;
+  
+  const storageKey = `actionPlan_${currentSession.id}_${itemId}`;
+  const savedData = localStorage.getItem(storageKey);
+  if (savedData) {
+    try {
+      const parsed = JSON.parse(savedData);
+      console.log('[ActionPlan Local] Restored from localStorage:', storageKey);
+      return parsed;
+    } catch (e) {
+      console.error('[ActionPlan Local] Failed to parse saved data:', e);
+    }
+  }
+  return null;
+}
+
+// Удаление плана действий из localStorage после успешной синхронизации
+function removeActionPlanFromLocalStorage(itemId) {
+  if (!currentSession) return;
+  
+  const storageKey = `actionPlan_${currentSession.id}_${itemId}`;
+  localStorage.removeItem(storageKey);
+  console.log('[ActionPlan Local] Removed from localStorage:', storageKey);
+}
+
+// Очистка всех планов действий сессии из localStorage
+function clearAllActionPlansFromLocalStorage(sessionId) {
+  const keysToRemove = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith(`actionPlan_${sessionId}_`)) {
+      keysToRemove.push(key);
+    }
+  }
+  keysToRemove.forEach(key => localStorage.removeItem(key));
+  console.log('[ActionPlan Local] Cleared all action plans for session:', sessionId);
+}
+
 async function saveActionPlan(itemId, field = 'text', value = null, realtime = false) {
   // Блокируем в режиме просмотра
   if (isViewOnly) return;
@@ -2662,6 +2718,9 @@ async function saveActionPlan(itemId, field = 'text', value = null, realtime = f
       };
 
       console.log('[ActionPlan] Saving data:', { itemId, data });
+
+      // Сначала сохраняем в localStorage для резервного копирования
+      saveActionPlanToLocalStorage(itemId, data);
 
       // Отправляем на сервер для сохранения в БД
       const response = await fetch(`/api/sessions/${currentSession.id}/items/${itemId}/action-plan`, {
@@ -2697,10 +2756,14 @@ async function saveActionPlan(itemId, field = 'text', value = null, realtime = f
         action_plan_when: result.action_plan_when
       });
 
+      // После успешного сохранения в БД удаляем из localStorage
+      removeActionPlanFromLocalStorage(itemId);
+
       console.log('[ActionPlan] Saved successfully:', { itemId, field, who: data.action_plan_who, when: data.action_plan_when });
     } catch (error) {
       console.error('[ActionPlan] Error saving:', error);
-      showToast('Ошибка сохранения плана действий', 'danger');
+      // Данные уже сохранены в localStorage, попробуем позже
+      showToast('Ошибка сохранения. Данные сохранены локально.', 'warning');
     }
   };
 
@@ -2875,14 +2938,19 @@ function startActionPlanAutoSave() {
       if (!hasChanges) continue;
 
       try {
+        const data = {
+          action_plan_text: currentHtml !== '' ? currentHtml : (item.action_plan_text || null),
+          action_plan_who: whoInput ? (whoInput.value !== '' ? whoInput.value : (item.action_plan_who || null)) : null,
+          action_plan_when: whenInput ? (whenInput.value !== '' ? whenInput.value : (item.action_plan_when || null)) : null
+        };
+
+        // Сначала сохраняем в localStorage для резервного копирования
+        saveActionPlanToLocalStorage(itemId, data);
+
         const response = await fetch(`/api/sessions/${currentSession.id}/items/${itemId}/action-plan`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action_plan_text: currentHtml !== '' ? currentHtml : (item.action_plan_text || null),
-            action_plan_who: whoInput ? (whoInput.value !== '' ? whoInput.value : (item.action_plan_who || null)) : null,
-            action_plan_when: whenInput ? (whenInput.value !== '' ? whenInput.value : (item.action_plan_when || null)) : null
-          })
+          body: JSON.stringify(data)
         });
 
         if (!response.ok) {
@@ -2908,9 +2976,13 @@ function startActionPlanAutoSave() {
           action_plan_when: result.action_plan_when
         });
 
+        // После успешного сохранения в БД удаляем из localStorage
+        removeActionPlanFromLocalStorage(itemId);
+
         console.log('[ActionPlan] Auto-saved:', itemId, { who: whoInput?.value, when: whenInput?.value });
       } catch (error) {
         console.error('[ActionPlan] Auto-save error:', error);
+        // Данные уже сохранены в localStorage, попробуем позже
       }
     }
   }, 3000); // Каждые 3 секунды
@@ -5548,6 +5620,36 @@ function renderDiscussionTab() {
     initDraggable(item);
   });
 
+  // Восстанавливаем данные из localStorage если они есть (резервная копия)
+  // Это нужно для случаев когда БД недоступна или данные не успели сохраниться
+  const actionPlanEditors = container.querySelectorAll('.action-plan-editor');
+  actionPlanEditors.forEach(editor => {
+    const itemId = editor.dataset.itemId;
+    const savedData = restoreActionPlanFromLocalStorage(itemId);
+    if (savedData) {
+      // Восстанавливаем текст плана действий
+      if (savedData.action_plan_text && editor.innerHTML === (currentSession?.items?.find(i => i.id === itemId)?.action_plan_text || '')) {
+        editor.innerHTML = savedData.action_plan_text;
+        console.log('[ActionPlan Local] Restored text from localStorage for item:', itemId);
+      }
+      
+      // Восстанавливаем поля "Кому" и "Когда"
+      const wrapper = editor.closest('.discussion-item-plan');
+      const inputs = wrapper?.querySelectorAll(`input[data-item-id="${itemId}"]`) || [];
+      const whoInput = inputs[0];
+      const whenInput = inputs[1];
+      
+      if (whoInput && savedData.action_plan_who) {
+        whoInput.value = savedData.action_plan_who;
+        console.log('[ActionPlan Local] Restored who from localStorage for item:', itemId);
+      }
+      if (whenInput && savedData.action_plan_when) {
+        whenInput.value = savedData.action_plan_when;
+        console.log('[ActionPlan Local] Restored when from localStorage for item:', itemId);
+      }
+    }
+  });
+
   // Для пользователей делаем поля только для чтения
   if (!isAdmin) {
     container.querySelectorAll('.action-plan-editor').forEach(editor => {
@@ -6102,6 +6204,12 @@ async function confirmEndSession() {
     sessionEnded = true;
     saveSession();
 
+    // Очищаем localStorage планов действий после успешного завершения сессии
+    // Данные уже сохранены на сервере
+    if (currentSession?.id) {
+      clearAllActionPlansFromLocalStorage(currentSession.id);
+    }
+
     bootstrap.Modal.getInstance(document.getElementById('endSessionModal')).hide();
     // Очищаем localStorage после завершения сессии
     localStorage.removeItem('retroSession');
@@ -6174,8 +6282,38 @@ async function quickEndSession(sessionId, sessionName) {
 // Экспорт результатов
 async function exportResults(format) {
   try {
+    // Загружаем полную сессию для получения column_headers и template_columns
+    const sessionResponse = await fetch(`/api/sessions/${currentSession.id}`);
+    const fullSession = await sessionResponse.json();
+    
+    console.log('[Export] Full session loaded:', {
+      column_headers: fullSession.column_headers,
+      template_columns: fullSession.template_columns
+    });
+
+    // Обновляем currentSession актуальными данными
+    // Парсим column_headers если это строка
+    currentSession.column_headers = fullSession.column_headers;
+    if (typeof fullSession.column_headers === 'string') {
+      try {
+        currentSession.column_headers = JSON.parse(fullSession.column_headers);
+      } catch (e) {
+        console.error('[Export] Failed to parse column_headers:', e);
+        currentSession.column_headers = {};
+      }
+    }
+    currentSession.template_columns = fullSession.template_columns;
+    currentSession.customColumns = fullSession.customColumns;
+    
     const itemsResponse = await fetch(`/api/sessions/${currentSession.id}/items`);
     let items = await itemsResponse.json();
+
+    console.log('[Export] Items loaded:', items.length, 'Sample:', items.slice(0, 2).map(i => ({ 
+      id: i.id, 
+      category: i.category, 
+      text: i.text?.substring(0, 30),
+      merged_parts_data: i.merged_parts_data ? '✅' : '❌'
+    })));
 
     // Загружаем голоса голосования
     const votesResponse = await fetch(`/api/sessions/${currentSession.id}/votes`);
@@ -6187,11 +6325,98 @@ async function exportResults(format) {
       vote_mode_votes: votesData[item.id] || []
     }));
 
+    // Отладка - логируем объединённые карточки
+    const mergedItems = items.filter(i => i.text && i.text.includes('─────────────'));
+    console.log('[Export] Found merged items:', mergedItems.length, mergedItems.map(i => ({ 
+      id: i.id, 
+      category: i.category,
+      has_merged_parts_data: !!i.merged_parts_data,
+      merged_parts_data_preview: i.merged_parts_data?.substring(0, 50)
+    })));
+
     const data = {
       session: currentSession,
       items,
       exportedAt: new Date().toISOString()
     };
+
+    // Вспомогательная функция для получения названия колонки
+    function getColumnHeader(col, columnHeaders) {
+      return columnHeaders[col.category] || col.name;
+    }
+    
+    // Вспомогательная функция для рендеринга содержимого карточки
+    function renderCardContent(item) {
+      let html = '';
+      const isMerged = item.text && item.text.includes('─────────────');
+      let mergedPartsData = null;
+      if (item.merged_parts_data) {
+        try {
+          mergedPartsData = typeof item.merged_parts_data === 'string' 
+            ? JSON.parse(item.merged_parts_data) 
+            : item.merged_parts_data;
+        } catch (e) {
+          console.error('[Export] Failed to parse merged_parts_data:', e);
+        }
+      }
+
+      if (isMerged) {
+        const parts = item.text.split(/\n{1,2}─────────────\n{1,2}/).filter(p => p.trim());
+        if (mergedPartsData && mergedPartsData.length > 0) {
+          mergedPartsData.forEach((part, index) => {
+            const partText = part.text || parts[index] || '';
+            const partMemeMatch = partText.match(/!\[(.*?)\]\((.*?)\)/);
+            if (partMemeMatch) {
+              html += `<img src="${escapeHtml(partMemeMatch[2])}" alt="${escapeHtml(partMemeMatch[1])}" class="card-meme" style="margin-bottom: 8px;">\n`;
+              const remainingText = partText.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
+              if (remainingText) {
+                html += `<div style="margin-bottom: 8px; padding: 8px; background: #f9f9f9; border-left: 3px solid #6366f1;">${index + 1}. ${escapeHtml(remainingText)}</div>\n`;
+              }
+            } else if (partText.startsWith('😄') || partText.startsWith('😊') || partText.startsWith('😐') || partText.startsWith('😫') || partText.startsWith('💀')) {
+              html += `<div class="card-emoji">${escapeHtml(partText)}</div>\n`;
+            } else {
+              html += `<div style="margin-bottom: 8px; padding: 8px; background: #f9f9f9; border-left: 3px solid #6366f1;">${index + 1}. ${escapeHtml(partText)}</div>\n`;
+            }
+          });
+          html += `<div style="margin-top: 8px; padding: 4px 8px; background: #e5e7eb; border-radius: 4px; display: inline-block; font-size: 0.75rem; color: #666;"><span style="display: flex; align-items: center; gap: 4px;"><span class="material-icons" style="font-size: 12px;">call_merge</span>Объединённая карточка (${parts.length} частей)</span></div>\n`;
+        } else {
+          parts.forEach((part, index) => {
+            const partMemeMatch = part.match(/!\[(.*?)\]\((.*?)\)/);
+            if (partMemeMatch) {
+              html += `<img src="${escapeHtml(partMemeMatch[2])}" alt="${escapeHtml(partMemeMatch[1])}" class="card-meme" style="margin-bottom: 8px;">\n`;
+              const remainingText = part.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
+              if (remainingText) {
+                html += `<div style="margin-bottom: 8px; padding: 8px; background: #f9f9f9; border-left: 3px solid #6366f1;">${index + 1}. ${escapeHtml(remainingText)}</div>\n`;
+              }
+            } else if (part.startsWith('😄') || part.startsWith('😊') || part.startsWith('😐') || part.startsWith('😫') || part.startsWith('💀')) {
+              html += `<div class="card-emoji">${escapeHtml(part)}</div>\n`;
+            } else {
+              html += `<div style="margin-bottom: 8px; padding: 8px; background: #f9f9f9; border-left: 3px solid #6366f1;">${index + 1}. ${escapeHtml(part)}</div>\n`;
+            }
+          });
+          html += `<div style="margin-top: 8px; padding: 4px 8px; background: #e5e7eb; border-radius: 4px; display: inline-block; font-size: 0.75rem; color: #666;"><span style="display: flex; align-items: center; gap: 4px;"><span class="material-icons" style="font-size: 12px;">call_merge</span>Объединённая карточка (${parts.length} частей)</span></div>\n`;
+        }
+      } else if (item.meme_url) {
+        html += `<img src="${escapeHtml(item.meme_url)}" alt="Meme" class="card-meme">\n`;
+      } else if (item.text) {
+        const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/g);
+        if (markdownMemeMatch && markdownMemeMatch.length > 0) {
+          markdownMemeMatch.forEach(match => {
+            const [, alt, url] = match.match(/!\[(.*?)\]\((.*?)\)/);
+            html += `<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" class="card-meme">\n`;
+          });
+          const remainingText = item.text.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
+          if (remainingText) {
+            html += `<div style="margin-top: 8px;">${escapeHtml(remainingText)}</div>\n`;
+          }
+        } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
+          html += `<div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
+        } else {
+          html += `<div>${escapeHtml(item.text)}</div>\n`;
+        }
+      }
+      return html;
+    }
 
     if (format === 'json') {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -6289,15 +6514,29 @@ async function exportResults(format) {
       const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
       const templateName = currentSession.template;
 
+      // Получаем кастомные заголовки (уже распаршено в начале функции)
+      const columnHeaders = currentSession.column_headers || {};
+
       // Собираем все колонки: стандартные из шаблона + кастомные
-      const allColumns = [...template.columns];
+      let allColumns = [...template.columns];
+
+      // Используем template_columns если есть (уже распаршено в начале функции)
+      if (currentSession.template_columns && currentSession.template_columns.trim() !== '') {
+        try {
+          allColumns = typeof currentSession.template_columns === 'string'
+            ? JSON.parse(currentSession.template_columns)
+            : currentSession.template_columns;
+        } catch (e) {
+          console.error('Error parsing template_columns:', e);
+        }
+      }
 
       // Добавляем кастомные колонки, если они есть
       if (currentSession.customColumns && currentSession.customColumns.length > 0) {
         currentSession.customColumns.forEach(customCol => {
-          // Проверяем, нет ли уже такой колонки (чтобы избежать дублирования)
           if (!allColumns.find(col => col.category === customCol.category)) {
             allColumns.push({
+              id: customCol.id,
               name: customCol.name,
               category: customCol.category,
               icon: customCol.icon || 'add_column'
@@ -6310,21 +6549,18 @@ async function exportResults(format) {
       allColumns.forEach(col => {
         const colItems = items.filter(i => i.category === col.category);
         const categoryClass = `template-${templateName}-${col.category}`;
-
-        // Определяем имя класса для заголовка (заменяем пробелы и спецсимволы)
         const headerClass = `header-${templateName}-${col.category.replace(/\s+/g, '-').toLowerCase()}`;
+        const columnHeader = getColumnHeader(col, columnHeaders);
 
         html += `      <div class="column">
         <div class="column-header ${headerClass}">
-          <h3>${escapeHtml(col.name)}</h3>
+          <h3>${escapeHtml(columnHeader)}</h3>
         </div>
 `;
 
         colItems.forEach(item => {
           html += `        <div class="card ${categoryClass}">
 `;
-
-          // Автор и дата
           html += `          <div style="font-size: 0.75rem; color: #666; margin-bottom: 8px;">
             <span style="display: flex; align-items: center; gap: 4px;">
               <span style="font-weight: bold;">👤 ${escapeHtml(item.author)}</span>
@@ -6332,29 +6568,9 @@ async function exportResults(format) {
             <span style="color: #999; margin-left: 10px;">📅 ${new Date(item.created_at).toLocaleString()}</span>
           </div>
 `;
-
-          // Содержимое карточки (текст, мемы, смайлы)
-          html += `          <div class="card-content">
-`;
-
-          if (item.meme_url) {
-            html += `            <img src="${escapeHtml(item.meme_url)}" alt="Meme" class="card-meme">\n`;
-          } else if (item.text) {
-            const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
-            if (markdownMemeMatch) {
-              html += `            <img src="${escapeHtml(markdownMemeMatch[2])}" alt="${escapeHtml(markdownMemeMatch[1])}" class="card-meme">\n`;
-              const remainingText = item.text.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
-              if (remainingText) {
-                html += `            <div style="margin-top: 8px;">${escapeHtml(remainingText)}</div>\n`;
-              }
-            } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
-              html += `            <div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
-            } else {
-              html += `            <div>${escapeHtml(item.text)}</div>\n`;
-            }
-          }
-          html += `          </div>
-`;
+          html += `          <div class="card-content">\n`;
+          html += renderCardContent(item);
+          html += `          </div>\n`;
 
           // Реакции
           if (item.reactions) {
@@ -6411,12 +6627,10 @@ async function exportResults(format) {
 
         html += `      <div class="card discussion-card ${categoryClass}">
 `;
-
         html += `        <div style="background: #f59e0b; color: white; padding: 8px 12px; border-radius: 6px 6px 0 0; margin: -12px -12px 12px -12px; font-weight: bold; text-align: center;">
           ${escapeHtml(categoryName)}
         </div>
 `;
-
         html += `        <div style="font-size: 0.75rem; color: #666; margin-bottom: 8px;">
           <span style="display: flex; align-items: center; gap: 4px;">
             <span style="font-weight: bold;">👤 ${escapeHtml(item.author)}</span>
@@ -6424,27 +6638,9 @@ async function exportResults(format) {
           <span style="color: #999; margin-left: 10px;">📅 ${new Date(item.created_at).toLocaleString()}</span>
         </div>
 `;
-
-        html += `        <div class="card-content">
-`;
-        if (item.meme_url) {
-          html += `          <img src="${escapeHtml(item.meme_url)}" alt="Meme" class="card-meme">\n`;
-        } else if (item.text) {
-          const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
-          if (markdownMemeMatch) {
-            html += `          <img src="${escapeHtml(markdownMemeMatch[2])}" alt="${escapeHtml(markdownMemeMatch[1])}" class="card-meme">\n`;
-            const remainingText = item.text.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
-            if (remainingText) {
-              html += `          <div style="margin-top: 8px;">${escapeHtml(remainingText)}</div>\n`;
-            }
-          } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
-            html += `          <div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
-          } else {
-            html += `          <div>${escapeHtml(item.text)}</div>\n`;
-          }
-        }
-        html += `        </div>
-`;
+        html += `        <div class="card-content">\n`;
+        html += renderCardContent(item);
+        html += `        </div>\n`;
 
         // Реакции
         if (item.reactions) {
@@ -6524,7 +6720,29 @@ async function exportResults(format) {
     .columns-container { display: flex; gap: 15px; }
     .discussion-single-column { display: block; }
     .column { flex: 1; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 15px; }
-    .column-header { padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; text-align: center; color: white; font-weight: bold; }
+    .column-header { padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; text-align: center; color: #333; font-weight: bold; }
+    .column-header h3 { margin: 0; color: inherit; }
+    /* Цвета заголовков по шаблонам */
+    .header-template-classic-start { background-color: #10b981; }
+    .header-template-classic-stop { background-color: #ef4444; }
+    .header-template-classic-continue { background-color: #3b82f6; }
+    .header-template-mad-sad-glad-mad { background-color: #ef4444; }
+    .header-template-mad-sad-glad-sad { background-color: #f59e0b; }
+    .header-template-mad-sad-glad-glad { background-color: #10b981; }
+    .header-template-good-bad-ideas-good { background-color: #10b981; }
+    .header-template-good-bad-ideas-bad { background-color: #ef4444; }
+    .header-template-good-bad-ideas-ideas { background-color: #f59e0b; }
+    .header-template-kiss-keep { background-color: #3b82f6; }
+    .header-template-kiss-improve { background-color: #f59e0b; }
+    .header-template-kiss-start { background-color: #10b981; }
+    .header-template-kiss-stop { background-color: #ef4444; }
+    .header-template-sailboat-wind { background-color: #06b6d4; }
+    .header-template-sailboat-anchor { background-color: #f59e0b; }
+    .header-template-sailboat-rocks { background-color: #6b7280; }
+    .header-template-sailboat-island { background-color: #10b981; }
+    .header-template-freeform-general { background-color: #6366f1; }
+    /* Универсальный стиль для кастомных колонок */
+    .column-header[class*="header-template-freeform-"] { background-color: #6366f1; }
     .card { padding: 12px; margin: 10px 0; border-radius: 8px; border-left: 5px solid; }
     .card-content { margin: 10px 0; word-wrap: break-word; }
     .card-meme { max-width: 100%; max-height: 200px; border-radius: 6px; margin: 8px 0; }
@@ -6594,11 +6812,32 @@ async function exportResults(format) {
     <div class="columns-container">
 `;
 
+      // Получаем кастомные заголовки колонок (уже распаршено в начале функции)
+      const columnHeaders = currentSession.column_headers || {};
+
+      console.log('[Export] Column headers:', columnHeaders);
+      console.log('[Export] Template columns:', currentSession.template_columns);
+
+      // Получаем шаблон для определения стандартных колонок
       const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
       const templateName = currentSession.template;
 
       // Собираем все колонки: стандартные из шаблона + кастомные
-      const allColumns = [...template.columns];
+      let allColumns = [...template.columns];
+
+      // Добавляем кастомные колонки из template_columns если есть
+      if (currentSession.template_columns && currentSession.template_columns.trim() !== '') {
+        try {
+          const templateColumns = typeof currentSession.template_columns === 'string'
+            ? JSON.parse(currentSession.template_columns)
+            : currentSession.template_columns;
+          // Используем template_columns вместо стандартных колонок шаблона
+          allColumns = templateColumns;
+          console.log('[Export] Using template_columns:', allColumns);
+        } catch (e) {
+          console.error('Error parsing template_columns:', e);
+        }
+      }
 
       // Добавляем кастомные колонки, если они есть
       if (currentSession.customColumns && currentSession.customColumns.length > 0) {
@@ -6606,6 +6845,7 @@ async function exportResults(format) {
           // Проверяем, нет ли уже такой колонки (чтобы избежать дублирования)
           if (!allColumns.find(col => col.category === customCol.category)) {
             allColumns.push({
+              id: customCol.id,
               name: customCol.name,
               category: customCol.category,
               icon: customCol.icon || 'add_column'
@@ -6618,21 +6858,22 @@ async function exportResults(format) {
       allColumns.forEach(col => {
         const colItems = items.filter(i => i.category === col.category);
         const categoryClass = `template-${templateName}-${col.category}`;
-
-        // Определяем имя класса для заголовка (заменяем пробелы и спецсимволы)
         const headerClass = `header-${templateName}-${col.category.replace(/\s+/g, '-').toLowerCase()}`;
+
+        // Используем кастомный заголовок если есть, иначе название из шаблона
+        const columnHeader = columnHeaders[col.category] || col.name;
+        
+        console.log('[Export] Column:', col.category, 'columnHeader:', columnHeader, 'col.name:', col.name, 'columnHeaders:', columnHeaders);
 
         html += `      <div class="column">
         <div class="column-header ${headerClass}">
-          <h3>${escapeHtml(col.name)}</h3>
+          <h3>${escapeHtml(columnHeader)}</h3>
         </div>
 `;
 
         colItems.forEach(item => {
           html += `        <div class="card ${categoryClass}">
 `;
-
-          // Автор и дата
           html += `          <div style="font-size: 0.75rem; color: #666; margin-bottom: 8px;">
             <span style="display: flex; align-items: center; gap: 4px;">
               <span style="font-weight: bold;">👤 ${escapeHtml(item.author)}</span>
@@ -6640,35 +6881,9 @@ async function exportResults(format) {
             <span style="color: #999; margin-left: 10px;">📅 ${new Date(item.created_at).toLocaleString()}</span>
           </div>
 `;
-
-          // Содержимое карточки (текст, мемы, смайлы)
-          html += `          <div class="card-content">
-`;
-
-          if (item.meme_url) {
-            // Мем из поля meme_url - вставляем как картинку
-            html += `            <img src="${escapeHtml(item.meme_url)}" alt="Meme" class="card-meme">\n`;
-          } else if (item.text) {
-            // Проверяем на markdown формат мемов ![alt](url)
-            const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
-            if (markdownMemeMatch) {
-              // Markdown мем - извлекаем URL и вставляем как картинку
-              html += `            <img src="${escapeHtml(markdownMemeMatch[2])}" alt="${escapeHtml(markdownMemeMatch[1])}" class="card-meme">\n`;
-              // Остальной текст если есть
-              const remainingText = item.text.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
-              if (remainingText) {
-                html += `            <div style="margin-top: 8px;">${escapeHtml(remainingText)}</div>\n`;
-              }
-            } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
-              // Только эмодзи
-              html += `            <div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
-            } else {
-              // Обычный текст
-              html += `            <div>${escapeHtml(item.text)}</div>\n`;
-            }
-          }
-          html += `          </div>
-`;
+          html += `          <div class="card-content">\n`;
+          html += renderCardContent(item);
+          html += `          </div>\n`;
 
           // Реакции
           if (item.reactions) {
@@ -6736,13 +6951,13 @@ async function exportResults(format) {
         const categoryName = template_col ? template_col.name : item.category;
 
         html += `      <div class="discussion-item-container">\n`;
-        
+
         // Левая колонка - карточка
         html += `        <div class="discussion-card-left">\n`;
         html += `          <div class="card discussion-card ${categoryClass}">\n`;
 
         // Заголовок категории
-        html += `            <div style="background: #f59e0b; color: white; padding: 8px 12px; border-radius: 6px 6px 0 0; margin: -12px -12px 12px -12px; font-weight: bold; text-align: center;">
+        html += `            <div style="background: #f59e0b; color: #333; padding: 8px 12px; border-radius: 6px 6px 0 0; margin: -12px -12px 12px -12px; font-weight: bold; text-align: center;">
           ${escapeHtml(categoryName)}
         </div>\n`;
 
@@ -6754,59 +6969,14 @@ async function exportResults(format) {
           <span style="color: #999; margin-left: 10px;">📅 ${new Date(item.created_at).toLocaleString()}</span>
         </div>\n`;
 
-        // Содержимое карточки
+        // Содержимое карточки - используем renderCardContent для поддержки объединённых
         html += `            <div class="card-content">\n`;
-        if (item.meme_url) {
-          html += `              <img src="${escapeHtml(item.meme_url)}" alt="Meme" class="card-meme">\n`;
-        } else if (item.text) {
-          const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/);
-          if (markdownMemeMatch) {
-            html += `              <img src="${escapeHtml(markdownMemeMatch[2])}" alt="${escapeHtml(markdownMemeMatch[1])}" class="card-meme">\n`;
-            const remainingText = item.text.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
-            if (remainingText) {
-              html += `              <div style="margin-top: 8px;">${escapeHtml(remainingText)}</div>\n`;
-            }
-          } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
-            html += `              <div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
-          } else {
-            html += `              <div>${escapeHtml(item.text)}</div>\n`;
-          }
-        }
+        html += renderCardContent(item);
         html += `            </div>\n`;
-
-        // Реакции
-        if (item.reactions) {
-          const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
-          const emojiMap = {
-            'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉',
-            'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩',
-            'hundred':'💯', 'pray':'🙏', 'laugh':'🤣', 'love':'😍', 'surprised':'😮'
-          };
-          const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
-          if (activeReactions.length > 0) {
-            html += `            <div class="reactions">\n`;
-            activeReactions.forEach(([name, count]) => {
-              html += `              <span class="reaction">${emojiMap[name] || name} ${count}</span>\n`;
-            });
-            html += `            </div>\n`;
-          }
-        }
-
-        // Голоса голосования (круглые красные лайки)
-        if (item.vote_mode_votes) {
-          const voteCount = typeof item.vote_mode_votes === 'string' ?
-            JSON.parse(item.vote_mode_votes).length :
-            (Array.isArray(item.vote_mode_votes) ? item.vote_mode_votes.length : 0);
-          if (voteCount > 0) {
-            html += `            <div class="reactions">\n`;
-            html += `              <span class="vote-reaction"><span class="icon">👍</span> ${voteCount}</span>\n`;
-            html += `            </div>\n`;
-          }
-        }
 
         html += `          </div>\n`;
         html += `        </div>\n`;
-        
+
         // Правая колонка - План действий
         if (item.action_plan_text || item.action_plan_who || item.action_plan_when) {
           html += `        <div class="discussion-plan-right">\n`;
