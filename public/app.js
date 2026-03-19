@@ -6441,7 +6441,7 @@ async function exportResults(format) {
     .columns-container { display: flex; gap: 15px; }
     .discussion-single-column { display: block; }
     .column { flex: 1; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 15px; min-width: 0; }
-    .column-header { padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; text-align: center; color: white; font-weight: bold; }
+    .column-header { padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; text-align: center; color: #000; font-weight: bold; }
     .card { padding: 12px; margin: 10px 0; border-radius: 8px; border-left: 5px solid; page-break-inside: avoid; }
     .card-content { margin: 10px 0; word-wrap: break-word; }
     .card-meme { max-width: 100%; max-height: 200px; border-radius: 6px; margin: 8px 0; }
@@ -6622,13 +6622,24 @@ async function exportResults(format) {
 
       discussionItems.forEach(item => {
         const categoryClass = `template-${templateName}-${item.category}`;
-        const template_col = template.columns.find(c => c.category === item.category);
-        const categoryName = template_col ? template_col.name : item.category;
+        
+        // Получаем название колонки с учётом кастомных заголовков (как в Brain Storm)
+        let columnHeader = columnHeaders[item.category];
+        if (!columnHeader && allColumns) {
+          const colFromAllColumns = allColumns.find(c => c.category === item.category);
+          if (colFromAllColumns && colFromAllColumns.name) {
+            columnHeader = colFromAllColumns.name;
+          }
+        }
+        if (!columnHeader) {
+          const template_col = template.columns.find(c => c.category === item.category);
+          columnHeader = template_col ? template_col.name : item.category;
+        }
 
         html += `      <div class="card discussion-card ${categoryClass}">
 `;
-        html += `        <div style="background: #f59e0b; color: white; padding: 8px 12px; border-radius: 6px 6px 0 0; margin: -12px -12px 12px -12px; font-weight: bold; text-align: center;">
-          ${escapeHtml(categoryName)}
+        html += `        <div style="background: #f59e0b; color: #000; padding: 8px 12px; border-radius: 6px 6px 0 0; margin: -12px -12px 12px -12px; font-weight: bold; text-align: center;">
+          ${escapeHtml(columnHeader)}
         </div>
 `;
         html += `        <div style="font-size: 0.75rem; color: #666; margin-bottom: 8px;">
@@ -6947,8 +6958,19 @@ async function exportResults(format) {
 
       discussionItems.forEach(item => {
         const categoryClass = `template-${templateName}-${item.category}`;
-        const template_col = template.columns.find(c => c.category === item.category);
-        const categoryName = template_col ? template_col.name : item.category;
+        
+        // Получаем название колонки с учётом кастомных заголовков (как в Brain Storm)
+        let columnHeader = columnHeaders[item.category];
+        if (!columnHeader && allColumns) {
+          const colFromAllColumns = allColumns.find(c => c.category === item.category);
+          if (colFromAllColumns && colFromAllColumns.name) {
+            columnHeader = colFromAllColumns.name;
+          }
+        }
+        if (!columnHeader) {
+          const template_col = template.columns.find(c => c.category === item.category);
+          columnHeader = template_col ? template_col.name : item.category;
+        }
 
         html += `      <div class="discussion-item-container">\n`;
 
@@ -6958,7 +6980,7 @@ async function exportResults(format) {
 
         // Заголовок категории
         html += `            <div style="background: #f59e0b; color: #333; padding: 8px 12px; border-radius: 6px 6px 0 0; margin: -12px -12px 12px -12px; font-weight: bold; text-align: center;">
-          ${escapeHtml(categoryName)}
+          ${escapeHtml(columnHeader)}
         </div>\n`;
 
         // Автор и дата
