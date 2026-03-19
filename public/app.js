@@ -890,12 +890,11 @@ function initSocket() {
       // Сохраняем в localStorage
       saveSession();
 
-      // Перерисовываем колонки и добавляем карточки
+      // Перерисовываем колонки
       renderColumns();
-      renderColumnsForBrainstorm();
 
-      // Перераспределяем карточки по новым колонкам
-      if (currentSession.items) {
+      // Перераспределяем карточки по новым колонкам только если сессия уже загружена
+      if (currentSession.items && !isSessionLoading) {
         currentSession.items.forEach(item => {
           addItemToColumn(item);
         });
