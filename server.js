@@ -50,6 +50,56 @@ app.use(express.static(path.join(__dirname, 'public'), {
   }
 }));
 
+// ==================== Прокси для мемов ====================
+// Прокси для загрузки изображений с внешних источников (Instagram, etc.)
+app.get('/api/proxy-meme', async (req, res) => {
+  const { url } = req.query;
+
+  if (!url) {
+    return res.status(400).send('URL parameter is required');
+  }
+
+  try {
+    // Проверяем что URL начинается с http:// или https://
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      return res.status(400).send('Invalid URL format');
+    }
+
+    // Используем https.get для простых запросов
+    const http = await import('http');
+    const https = await import('https');
+    
+    const lib = url.startsWith('https://') ? https : http;
+    
+    lib.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    }, (response) => {
+      if (response.statusCode !== 200) {
+        console.error(`Proxy error: Status ${response.statusCode}`);
+        return res.status(response.statusCode).send(`Failed to fetch image: ${response.statusMessage}`);
+      }
+
+      // Получаем тип контента
+      const contentType = response.headers['content-type'];
+      
+      // Пересылаем изображение
+      res.set('Content-Type', contentType || 'image/jpeg');
+      res.set('Cache-Control', 'public, max-age=86400');
+      
+      response.pipe(res);
+    }).on('error', (err) => {
+      console.error('Proxy meme error:', err.message);
+      res.status(500).send(`Failed to fetch image: ${err.message}`);
+    });
+    
+  } catch (err) {
+    console.error('Proxy meme error:', err.message);
+    res.status(500).send(`Failed to fetch image: ${err.message}`);
+  }
+});
+
 // ==================== API ====================
 
 // Создать новую сессию ретро
@@ -596,13 +646,10 @@ app.post('/api/sessions/:id/items/:itemId/react', async (req, res) => {
       [JSON.stringify(reactions), JSON.stringify(userReactions), itemId]
     );
 
-    const updatedResult = await pool.query('SELECT * FROM items WHERE id = $1', [itemId]);
-    const updatedItem = updatedResult.rows[0];
-
+    // Отправляем только обновление реакций (без item:updated чтобы не дёргались карточки)
     io.to(sessionId).emit('reaction:updated', { itemId, reactions, user_reactions: userReactions, userId });
-    io.to(sessionId).emit('item:updated', updatedItem);
 
-    res.json(updatedItem);
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -805,6 +852,25 @@ app.post('/api/sessions/:id/vote-limit', async (req, res) => {
     io.to(sessionId).emit('vote-limit:updated', { voteLimit });
     res.json({ success: true, voteLimit });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Сбросить голоса голосования
+app.post('/api/sessions/:id/votes/reset', async (req, res) => {
+  const { id: sessionId } = req.params;
+
+  try {
+    // Удаляем все голоса голосования
+    await pool.query('DELETE FROM vote_mode_votes WHERE session_id = $1', [sessionId]);
+    
+    // Обновляем items - сбрасываем votes в 0
+    await pool.query('UPDATE items SET votes = 0 WHERE session_id = $1', [sessionId]);
+    
+    console.log(`Votes reset for session ${sessionId}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error resetting votes:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1140,7 +1206,7 @@ io.on('connection', (socket) => {
   // Режим голосования
   socket.on('vote:mode', (data) => {
     const { sessionId, voteMode, sessionEnded } = data;
-    
+
     // Сохраняем в сессии
     if (!sessionStates.has(sessionId)) {
       sessionStates.set(sessionId, {});
@@ -1148,9 +1214,18 @@ io.on('connection', (socket) => {
     const session = sessionStates.get(sessionId);
     session.voteMode = voteMode;
     session.sessionEnded = sessionEnded;
-    
+
     io.in(sessionId).emit('vote:mode', { voteMode, sessionEnded });
     console.log(`Vote mode updated in session ${sessionId}: voteMode=${voteMode}, sessionEnded=${sessionEnded}`);
+  });
+
+  // Сброс голосования
+  socket.on('vote:reset', (data) => {
+    const { sessionId } = data;
+
+    // Отправляем всем в сессии
+    io.in(sessionId).emit('vote:reset', {});
+    console.log(`Vote reset in session ${sessionId}`);
   });
 
   // Выбор карточки для обсуждения
@@ -1162,6 +1237,18 @@ io.on('connection', (socket) => {
       selected
     });
     console.log(`Discussion toggle in session ${sessionId}: itemId=${itemId}, selected=${selected}`);
+  });
+
+  // Переключение вкладки админом - рассылаем всем в сессии
+  socket.on('tab:switch', (data) => {
+    const { sessionId, tab, isAdmin } = data;
+    if (isAdmin) {
+      io.to(sessionId).emit('tab:switch', {
+        tab,
+        isAdmin: true
+      });
+      console.log(`Admin switched tab to ${tab} in session ${sessionId}`);
+    }
   });
 
   // Обновление плана действий в реальном времени

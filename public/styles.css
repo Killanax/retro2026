@@ -854,7 +854,6 @@ body {
 
 .retro-item:hover {
   box-shadow: var(--shadow-lg);
-  transform: translateX(6px) translateY(-2px);
 }
 
 /* Drag-n-drop визуализация */
@@ -902,6 +901,10 @@ body {
   word-break: break-word;
   hyphens: auto;
   overflow-x: hidden;
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
 }
 
 /* Текст карточки - без ограничений высоты */
@@ -915,11 +918,16 @@ body {
   max-width: 100%;
   border-radius: 6px;
   margin: 6px 0;
-  max-height: 300px;
+  max-height: 100px;
   object-fit: contain;
   cursor: pointer;
-  transition: border 0.2s;
+  transition: border 0.2s, max-height 0.2s;
   position: relative;
+  z-index: 1;
+}
+
+.retro-item-meme:hover {
+  max-height: 200px;
 }
 
 .retro-item-meme.editing {
@@ -1802,6 +1810,67 @@ body {
   border: 1px solid #e2e8f0;
 }
 
+.meme-preview-container img {
+  cursor: context-menu;
+}
+
+.meme-preview-container img:hover {
+  outline: 3px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+/* Контекстное меню для мемов */
+.meme-context-menu {
+  position: fixed;
+  background: white;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2xl);
+  border: 1px solid #e2e8f0;
+  z-index: 9999;
+  min-width: 180px;
+  overflow: hidden;
+  animation: contextMenuFadeIn 0.15s ease-out;
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.meme-context-menu-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all var(--transition-fast);
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.meme-context-menu-item:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(139, 92, 246, 0.08) 100%);
+  color: var(--primary-color);
+}
+
+.meme-context-menu-item.delete {
+  color: var(--danger-color);
+}
+
+.meme-context-menu-item.delete:hover {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(248, 113, 113, 0.08) 100%);
+}
+
+.meme-context-menu-item .material-icons {
+  font-size: 18px;
+}
+
 /* Contenteditable для вставки мемов */
 #item-text[contenteditable="true"] {
   min-height: 120px;
@@ -1911,7 +1980,7 @@ body {
 .quick-vote-btn {
   position: absolute;
   right: 8px;
-  top: 50%;
+  top: 40%;
   transform: translateY(-50%);
   background: rgba(99, 102, 241, 0.15);
   backdrop-filter: blur(10px);
@@ -1925,10 +1994,11 @@ body {
   cursor: pointer;
   transition: all var(--transition-base);
   padding: 0;
-  z-index: 10;
+  z-index: 1000;
   flex-direction: column;
   gap: 2px;
   box-shadow: var(--shadow-md);
+  pointer-events: auto;
 }
 
 .quick-vote-btn:hover {
@@ -1949,6 +2019,14 @@ body {
   box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.3), var(--shadow-lg);
 }
 
+/* Синий лайк для админа когда скрыт голос (для трансляции экрана) */
+.quick-vote-btn.active.admin-hidden {
+  background: rgba(99, 102, 241, 0.5);
+  backdrop-filter: blur(10px);
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3), var(--shadow-lg);
+}
+
 .quick-vote-btn .material-icons {
   font-size: 28px;
   color: var(--primary-color);
@@ -1959,6 +2037,12 @@ body {
 .quick-vote-btn.active .material-icons {
   color: #ef4444;
   filter: drop-shadow(0 2px 4px rgba(239, 68, 68, 0.5));
+}
+
+/* Синий лайк для админа когда скрыт голос */
+.quick-vote-btn.active.admin-hidden .material-icons {
+  color: var(--primary-color);
+  filter: drop-shadow(0 2px 4px rgba(99, 102, 241, 0.5));
 }
 
 .quick-vote-btn .vote-count {
@@ -1977,6 +2061,11 @@ body {
 /* Красный фон счётчика когда пользователь проголосовал */
 .quick-vote-btn.active .vote-count {
   background: rgba(239, 68, 68, 0.9);
+}
+
+/* Синий фон счётчика для админа когда скрыт голос */
+.quick-vote-btn.active.admin-hidden .vote-count {
+  background: rgba(99, 102, 241, 0.9);
 }
 
 .retro-item {

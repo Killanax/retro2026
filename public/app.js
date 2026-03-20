@@ -22,6 +22,7 @@ let voteLimit = 5;
 // Режимы отображения (только для админа)
 let hideOthersCards = false; // Скрыть карточки других пользователей
 let hideOthersVotes = false; // Скрыть голоса других участников
+let hideAdminVotes = false; // Скрыть голоса админа при трансляции экрана
 let voteMode = false; // Режим голосования
 let votingStarted = false; // Голосование было начато в этой сессии (блокирует объединение/разъединение)
 let sessionEnded = false; // Сессия завершена (после нажатия "Стоп")
@@ -448,13 +449,13 @@ function initSocket() {
   });
 
   socket.on('item:updated', (item) => {
-    console.log('[WS] item:updated received:', { 
-      id: item.id, 
-      action_plan_text: item.action_plan_text?.substring(0, 30), 
-      action_plan_who: item.action_plan_who, 
-      action_plan_when: item.action_plan_when 
+    console.log('[WS] item:updated received:', {
+      id: item.id,
+      action_plan_text: item.action_plan_text?.substring(0, 30),
+      action_plan_who: item.action_plan_who,
+      action_plan_when: item.action_plan_when
     });
-    
+
     if (currentSession && item.session_id === currentSession.id) {
       // Обновляем в currentSession.items
       if (currentSession?.items) {
@@ -479,8 +480,19 @@ function initSocket() {
         delete userReactions[item.id];
       }
 
+      // Если пришло user_reactions — это обновление реакции, не перерисовываем карточку
+      // Реакции обновит обработчик reaction:updated
+      // ИСКЛЮЧЕНИЕ: если пришло merged_parts_data — это объединение карточек, нужно перерисовать
+      if (item.user_reactions !== undefined && item.user_reactions !== null) {
+        if (item.merged_parts_data === undefined) {
+          console.log('[WS] Reaction update - skipping re-render');
+          return;
+        }
+        console.log('[WS] Merge detected (merged_parts_data present) - will re-render');
+      }
+
       updateItemInColumn(item);
-      
+
       // Обновляем поля плана действий в обсуждении если они есть
       if (currentTab === 'discussion') {
         const editor = document.querySelector(`.action-plan-editor[data-item-id="${item.id}"]`);
@@ -640,6 +652,49 @@ function initSocket() {
     showToast(voteMode ? 'Режим голосования включён' : 'Режим голосования выключен', 'info');
   });
 
+  // Сброс голосования (от сервера)
+  socket.on('vote:reset', () => {
+    // Сбрасываем все голоса
+    voteModeVotes = {};
+    userVoteModeVotes = [];
+    voteMode = false;
+    votingStarted = false;
+    sessionEnded = false;
+    
+    // Сбрасываем выбранные карточки
+    selectedDiscussionItems.clear();
+
+    // Перерисовываем карточки без кнопок голосования
+    document.querySelectorAll('.retro-item').forEach(itemEl => {
+      const itemId = itemEl.dataset.id;
+      const item = currentSession?.items?.find(i => i.id === itemId);
+      if (item) {
+        const newHtml = createItemHtml(item);
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = newHtml;
+        const newItemEl = tempDiv.firstElementChild;
+        if (newItemEl) {
+          itemEl.replaceWith(newItemEl);
+          initDraggable(newItemEl);
+        }
+      }
+    });
+
+    // Скрываем кнопки голосования
+    document.querySelectorAll('.quick-vote-btn').forEach(btn => btn.remove());
+
+    // Если мы во вкладке Обсуждение - переключаем на Brain storm
+    if (currentTab === 'discussion') {
+      switchToTab('brainstorm');
+    }
+    
+    // Обновляем счётчик обсуждения
+    updateDiscussionCount();
+
+    applyVoteMode();
+    showToast('Голосование сброшено', 'success');
+  });
+
   // Обновление голоса голосования (от других пользователей)
   socket.on('vote:updated', (data) => {
     const { itemId, userId, voted } = data;
@@ -660,27 +715,39 @@ function initSocket() {
   // Обсуждение - выбор карточки другим участником
   socket.on('discussion:toggle', (data) => {
     const { itemId, userId, selected } = data;
-    
+
     // Не обновляем если это наш выбор
     if (userId === currentUserId) return;
-    
+
     if (selected) {
       selectedDiscussionItems.add(itemId);
     } else {
       selectedDiscussionItems.delete(itemId);
     }
-    
+
     updateDiscussionCount();
-    
+
     // Если мы во вкладке обсуждения - перерисовываем
     if (currentTab === 'discussion') {
       renderDiscussionTab();
     }
-    
+
     // Обновляем чекбокс в Brain storm
     const checkbox = document.querySelector(`.discussion-checkbox input[data-item-id="${itemId}"]`);
     if (checkbox) {
       checkbox.checked = selected;
+    }
+  });
+
+  // Переключение вкладки админом - все пользователи переключаются
+  socket.on('tab:switch', (data) => {
+    const { tab, isAdmin: fromAdmin } = data;
+    
+    // Переключаемся только если это команда от админа и мы не админ
+    if (fromAdmin && !isAdmin && currentSession) {
+      console.log('[WS] Switching to tab:', tab, '(from admin)');
+      switchToTab(tab);
+      showToast(`Админ переключил на вкладку "${tab === 'discussion' ? 'Обсуждение' : 'Brain storm'}"`, 'info');
     }
   });
 
@@ -1145,9 +1212,10 @@ async function restoreSession() {
       currentSession = data.session;
       currentUserId = data.userId;
       isAdmin = data.isAdmin;
-      // Восстанавливаем флаги голосования и завершения сессии
-      sessionEnded = data.sessionEnded || false;
-      votingStarted = data.votingStarted || false;
+      // Восстанавливаем флаги голосования и завершения сессии из currentSession
+      // Игнорируем data.sessionEnded и data.votingStarted (они могут быть устаревшими)
+      sessionEnded = currentSession.sessionEnded || false;
+      votingStarted = currentSession.votingStarted || false;
       
       // Сбрасываем joinSent, чтобы при подключении сокета отправился join
       joinSent = false;
@@ -2050,8 +2118,8 @@ function insertMeme(url, name) {
   const textarea = document.getElementById('item-text');
   if (!textarea) return;
 
-  // Вставляем HTML изображение вместо markdown-ссылки
-  const imgHtml = `<img src="${url}" alt="${name}" style="max-width: 200px; max-height: 150px; border-radius: 6px; margin: 4px; vertical-align: middle;">`;
+  // Вставляем HTML изображение с размерами
+  const imgHtml = `<img src="${url}" alt="${name}" style="max-width: 200px; max-height: 100px; border-radius: 6px; margin: 4px; vertical-align: middle; cursor: pointer;" onmouseover="this.style.maxHeight='200px'" onmouseout="this.style.maxHeight='100px'">`;
 
   // Фокусируемся на textarea
   textarea.focus();
@@ -2268,19 +2336,101 @@ function addCustomMeme() {
   document.getElementById('meme-url').value = '';
 }
 
+// Проверка URL мема - показываем предупреждение для Instagram и других сайтов
+function checkMemeUrl() {
+  const url = document.getElementById('meme-url').value.trim();
+  const alertDiv = document.getElementById('meme-warning-alert');
+  
+  const blockedDomains = ['instagram.com', 'facebook.com', 'fbcdn.net', 'cdninstagram.com', 'twitter.com', 'twimg.com', 'pinterest.com', 'tiktok.com'];
+  const isBlocked = blockedDomains.some(domain => url.includes(domain));
+  
+  if (alertDiv) {
+    alertDiv.style.display = isBlocked ? 'block' : 'none';
+  }
+}
+
+// Добавление мема через прокси (для обхода hotlinking ограничений)
+async function addMemeViaProxy() {
+  const name = document.getElementById('meme-name').value.trim();
+  const url = document.getElementById('meme-url').value.trim();
+
+  if (!name || !url) {
+    showToast('Введите название и URL мема', 'warning');
+    return;
+  }
+
+  // Используем CORS proxy для загрузки изображения
+  // В production можно использовать свой серверный прокси
+  const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+  
+  showToast('Загрузка через прокси...', 'info');
+
+  try {
+    // Пробуем загрузить изображение через прокси
+    const response = await fetch(proxyUrl);
+    const blob = await response.blob();
+    
+    // Проверяем, что это изображение
+    const contentType = blob.type;
+    if (!contentType.startsWith('image/')) {
+      showToast('Ошибка: URL не является изображением', 'danger');
+      return;
+    }
+
+    // Конвертируем blob в base64 для отображения
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64Data = reader.result;
+      
+      // Сохраняем base64 изображение
+      fetch(`/api/memes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          url: base64Data,
+          createdBy: currentUserId,
+          sessionId: currentSession?.id
+        })
+      })
+      .then(response => response.json())
+      .then(meme => {
+        console.log('[Meme] Added meme via proxy:', meme);
+        showToast('Мем добавлен через прокси!', 'success');
+        document.getElementById('meme-name').value = '';
+        document.getElementById('meme-url').value = '';
+        const modal = bootstrap.Modal.getInstance(document.getElementById('addMemeModal'));
+        if (modal) modal.hide();
+      })
+      .catch(error => {
+        console.error('Error adding meme via proxy:', error);
+        showToast('Ошибка добавления мема', 'danger');
+      });
+    };
+    reader.readAsDataURL(blob);
+  } catch (error) {
+    console.error('Error loading via proxy:', error);
+    showToast('Ошибка загрузки через прокси', 'danger');
+  }
+}
+
 // Подтверждение удаления глобального мема
 function confirmDeleteGlobalMeme(index) {
   const meme = globalMemes[index];
   if (!meme) return;
 
   const modal = new bootstrap.Modal(document.getElementById('deleteMemeConfirmModal'));
-  modal.show();
-
+  document.getElementById('delete-meme-message').textContent = `Удалить мем "${meme.name}" из глобального списка?`;
+  document.getElementById('delete-meme-url').value = meme.url;
+  document.getElementById('delete-meme-type').value = 'global';
+  
   const confirmBtn = document.getElementById('confirm-delete-meme-btn');
   confirmBtn.onclick = () => {
     deleteGlobalMeme(index);
     modal.hide();
   };
+  
+  modal.show();
 }
 
 // Удаление глобального мема (только админ)
@@ -2303,6 +2453,30 @@ function deleteGlobalMeme(index) {
   })
   .catch(error => {
     console.error('Error deleting meme:', error);
+    showToast('Ошибка удаления мема', 'danger');
+  });
+}
+
+// Удаление мема сессии
+function deleteSessionMeme(index) {
+  const meme = sessionMemes[index];
+  if (!meme) return;
+
+  fetch(`/api/sessions/${currentSession.id}/memes/${meme.id}`, {
+    method: 'DELETE'
+  })
+  .then(response => {
+    if (response.ok) {
+      sessionMemes.splice(index, 1);
+      renderQuickMemesButtons();
+      renderCustomMemesList();
+      showToast('Мем удалён из сессии', 'success');
+    } else {
+      showToast('Ошибка удаления мема', 'danger');
+    }
+  })
+  .catch(error => {
+    console.error('Error deleting session meme:', error);
     showToast('Ошибка удаления мема', 'danger');
   });
 }
@@ -2331,9 +2505,171 @@ function renderTextTabMemes(allMemes) {
   const container = document.getElementById('text-tab-memes-container');
   if (!container) return;
 
-  container.innerHTML = allMemes.map(meme => `
-    <img src="${meme.url}" class="meme-preview" onclick="insertMeme('${meme.url}', '${escapeHtml(meme.name)}')" title="${escapeHtml(meme.name)}">
-  `).join('');
+  container.innerHTML = allMemes.map((meme, index) => {
+    // Определяем тип мема
+    let memeType = 'custom';
+    if (index < 1 + globalMemes.length) {
+      memeType = index === 0 ? 'default' : 'global';
+    } else if (index < 1 + globalMemes.length + sessionMemes.length) {
+      memeType = 'session';
+    }
+    
+    // Для админа добавляем контекстное меню
+    const contextMenuAttr = isAdmin ? `oncontextmenu="showMemeContextMenu(event, '${meme.url}', '${memeType}')"` : '';
+    
+    return `<img src="${meme.url}" class="meme-preview" onclick="insertMeme('${meme.url}', '${escapeHtml(meme.name)}')" title="${escapeHtml(meme.name)}" ${contextMenuAttr}>`;
+  }).join('');
+}
+
+// Показать контекстное меню для мема
+function showMemeContextMenu(event, memeUrl, memeType) {
+  event.preventDefault();
+  event.stopPropagation();
+  
+  // Показываем контекстное меню только для админа
+  if (!isAdmin) return;
+  
+  // Удаляем существующее меню если есть
+  const existingMenu = document.querySelector('.meme-context-menu');
+  if (existingMenu) {
+    existingMenu.remove();
+  }
+  
+  // Создаём контекстное меню
+  const menu = document.createElement('div');
+  menu.className = 'meme-context-menu';
+  menu.innerHTML = `
+    <div class="meme-context-menu-item" onclick="copyMemeUrl('${escapeHtml(memeUrl)}')">
+      <span class="material-icons">content_copy</span>
+      Копировать URL
+    </div>
+    <div class="meme-context-menu-item delete" onclick="confirmDeleteMemeFromContext('${escapeHtml(memeUrl)}', '${memeType}')">
+      <span class="material-icons">delete</span>
+      Удалить мем
+    </div>
+  `;
+  
+  // Позиционируем меню
+  menu.style.left = event.pageX + 'px';
+  menu.style.top = event.pageY + 'px';
+  
+  // Корректируем позицию чтобы меню не уходило за экран
+  const rect = menu.getBoundingClientRect();
+  if (event.pageX + rect.width > window.innerWidth) {
+    menu.style.left = (event.pageX - rect.width) + 'px';
+  }
+  if (event.pageY + rect.height > window.innerHeight) {
+    menu.style.top = (event.pageY - rect.height) + 'px';
+  }
+  
+  document.body.appendChild(menu);
+  
+  // Сохраняем URL и тип для удаления
+  menu.dataset.memeUrl = memeUrl;
+  menu.dataset.memeType = memeType;
+}
+
+// Копировать URL мема
+function copyMemeUrl(url) {
+  navigator.clipboard.writeText(url).then(() => {
+    showToast('URL скопирован в буфер обмена', 'success');
+  }).catch(() => {
+    showToast('Не удалось скопировать URL', 'warning');
+  });
+  closeMemeContextMenu();
+}
+
+// Подтверждение удаления мема из контекстного меню
+function confirmDeleteMemeFromContext(memeUrl, memeType) {
+  closeMemeContextMenu();
+  
+  // Находим индекс мема и вызываем подтверждение
+  let index = -1;
+  
+  if (memeType === 'global') {
+    index = globalMemes.findIndex(m => m.url === memeUrl);
+    if (index >= 0) {
+      confirmDeleteGlobalMeme(index);
+    }
+  } else if (memeType === 'session') {
+    index = sessionMemes.findIndex(m => m.url === memeUrl);
+    if (index >= 0) {
+      confirmDeleteSessionMeme(index);
+    }
+  } else if (memeType === 'custom') {
+    index = customMemes.findIndex(m => m.url === memeUrl);
+    if (index >= 0) {
+      confirmDeleteCustomMemeLocal(index);
+    }
+  } else {
+    showToast('Этот мем нельзя удалить', 'warning');
+  }
+}
+
+// Закрыть контекстное меню
+function closeMemeContextMenu() {
+  const menu = document.querySelector('.meme-context-menu');
+  if (menu) {
+    menu.remove();
+  }
+}
+
+// Закрытие контекстного меню при клике вне его
+document.addEventListener('click', () => {
+  closeMemeContextMenu();
+});
+
+document.addEventListener('scroll', () => {
+  closeMemeContextMenu();
+});
+
+// Подтверждение удаления локального мема
+function confirmDeleteCustomMemeLocal(index) {
+  const meme = customMemes[index];
+  if (!meme) return;
+  
+  const modal = new bootstrap.Modal(document.getElementById('deleteMemeConfirmModal'));
+  document.getElementById('delete-meme-message').textContent = `Удалить мем "${meme.name}" из локального списка?`;
+  document.getElementById('delete-meme-url').value = meme.url;
+  document.getElementById('delete-meme-type').value = 'custom';
+  
+  const confirmBtn = document.getElementById('confirm-delete-meme-btn');
+  confirmBtn.onclick = () => {
+    deleteCustomMemeLocal(index);
+    modal.hide();
+  };
+  
+  modal.show();
+}
+
+// Удаление локального мема
+function deleteCustomMemeLocal(index) {
+  const meme = customMemes[index];
+  if (!meme) return;
+  
+  customMemes.splice(index, 1);
+  localStorage.setItem('customMemes', JSON.stringify(customMemes));
+  renderQuickMemesButtons();
+  showToast('Мем удалён из локального списка', 'success');
+}
+
+// Подтверждение удаления мема сессии
+function confirmDeleteSessionMeme(index) {
+  const meme = sessionMemes[index];
+  if (!meme) return;
+  
+  const modal = new bootstrap.Modal(document.getElementById('deleteMemeConfirmModal'));
+  document.getElementById('delete-meme-message').textContent = `Удалить мем "${meme.name}" из сессии?`;
+  document.getElementById('delete-meme-url').value = meme.url;
+  document.getElementById('delete-meme-type').value = 'session';
+  
+  const confirmBtn = document.getElementById('confirm-delete-meme-btn');
+  confirmBtn.onclick = () => {
+    deleteSessionMeme(index);
+    modal.hide();
+  };
+  
+  modal.show();
 }
 
 // Выбор смайла
@@ -3022,7 +3358,7 @@ function createItemHtml(item) {
     // Для типа meme или текста с markdown картинками
     // Проверяем, есть ли в тексте markdown картинки
     const hasMarkdownImages = /!\[(.*?)\]\((.*?)\)/g.test(item.text || '');
-    
+
     if (hasMarkdownImages) {
       // Рендерим как смешанный контент - текст + картинки
       let processedText = escapeHtml(item.text || '');
@@ -3814,7 +4150,10 @@ function handleColumnStartDrag(e, category) {
     }
     draggedColumnCategory = null;
     draggedColumnElement = null;
-    e.currentTarget.removeEventListener('dragend', dragEndHandler);
+    // Проверяем, существует ли ещё элемент в DOM перед удалением обработчика
+    if (e.currentTarget && e.currentTarget.parentNode) {
+      e.currentTarget.removeEventListener('dragend', dragEndHandler);
+    }
   });
 }
 
@@ -4567,6 +4906,17 @@ async function splitAllParts(itemId, item, parts) {
     method: 'DELETE'
   });
 
+  // Обновляем currentSession.items - удаляем старую карточку
+  if (currentSession?.items) {
+    currentSession.items = currentSession.items.filter(i => i.id !== itemId);
+  }
+
+  // Удаляем из DOM
+  const oldElement = document.getElementById(`item-${itemId}`);
+  if (oldElement) {
+    oldElement.remove();
+  }
+
   showToast(`Карточка разъединена на ${parts.length} части!`, 'success');
 }
 
@@ -4709,12 +5059,53 @@ async function splitSelectedParts(itemId, item, parts, selectedIndices) {
         ) : null
       })
     });
+
+    // Обновляем currentSession.items - обновляем старую карточку
+    if (currentSession?.items) {
+      const index = currentSession.items.findIndex(i => i.id === itemId);
+      if (index >= 0) {
+        currentSession.items[index] = {
+          ...currentSession.items[index],
+          text: remainingText.trim(),
+          order: baseOrder,
+          author: remainingAuthor,
+          type: remainingType,
+          meme_url: remainingMemeUrl,
+          reactions: remainingReactions,
+          user_reactions: remainingUserReactions
+        };
+      }
+    }
+    
+    // Обновляем DOM вручную - перерисовываем оставшуюся карточку
+    const element = document.getElementById(`item-${itemId}`);
+    if (element) {
+      const newHtml = createItemHtml(currentSession.items.find(i => i.id === itemId));
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = newHtml;
+      const newElement = tempDiv.firstElementChild;
+      if (newElement) {
+        element.replaceWith(newElement);
+        initDraggable(newElement);
+      }
+    }
   } else {
     // Если не осталось частей, удаляем карточку
     await fetch(`/api/sessions/${currentSession.id}/items/${itemId}`, {
       method: 'DELETE'
     });
- }
+
+    // Обновляем currentSession.items - удаляем старую карточку
+    if (currentSession?.items) {
+      currentSession.items = currentSession.items.filter(i => i.id !== itemId);
+    }
+    
+    // Удаляем из DOM
+    const element = document.getElementById(`item-${itemId}`);
+    if (element) {
+      element.remove();
+    }
+  }
 
   showToast(`Отделено ${selectedParts.length} части(ей)!`, 'success');
 }
@@ -4778,21 +5169,51 @@ function updateItemInColumn(item) {
       console.warn('[UI] New column not found for category', item.category);
     }
   } else {
-    // Та же колонка - обновляем содержимое и сортируем
-    const newHtml = createItemHtml(item);
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = newHtml;
-    const newElement = tempDiv.firstElementChild;
+    // Та же колонка - проверяем, нужно ли обновлять содержимое
+    // Не перерисовываем если обновилась только реакция (это делает updateItemReactions)
+    // Перерисовываем только если изменился текст, тип, мем, или action plan
+    
+    const existingAuthorEl = element.querySelector('.retro-item-author');
+    const existingAuthor = existingAuthorEl ? existingAuthorEl.textContent.trim().replace(/\s+/g, ' ') : '';
+    const currentAuthor = (item.author || 'Аноним').trim();
+    
+    const existingTextEl = element.querySelector('.retro-item-text');
+    const existingText = existingTextEl ? existingTextEl.innerText : '';
+    const currentText = item.text || '';
+    
+    const existingMemeEl = element.querySelector('.retro-item-meme');
+    const hasMeme = !!existingMemeEl;
+    const hasMemeInItem = item.type === 'meme' || (item.text && item.text.includes('!['));
+    
+    // Проверяем, есть ли значимые изменения
+    // merged_parts_data означает объединение карточек - нужно перерисовать
+    const hasSignificantChanges = (
+      item.merged_parts_data !== undefined || // Объединение карточек
+      existingAuthor !== currentAuthor ||
+      (existingTextEl && !currentText) || // Текст был но стал пустым
+      (!existingTextEl && currentText && !hasMemeInItem) || // Текста не было (был мем) но появился текст
+      (existingText && currentText && existingText.trim() !== currentText.trim())
+    );
+    
+    if (hasSignificantChanges) {
+      // Та же колонка - обновляем содержимое и сортируем
+      const newHtml = createItemHtml(item);
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = newHtml;
+      const newElement = tempDiv.firstElementChild;
 
-    element.replaceWith(newElement);
-    initDraggable(newElement);
-    // Сортируем колонку по порядку
-    sortColumnByOrder(item.category);
-    // Применяем режим голосования (показываем кнопки голосования если есть голоса)
-    applyVoteMode();
-    console.log('[UI] Updated element in same column', item.category);
-    // Восстанавливаем размер мема если есть
-    restoreMemeSizes();
+      element.replaceWith(newElement);
+      initDraggable(newElement);
+      // Сортируем колонку по порядку
+      sortColumnByOrder(item.category);
+      // Применяем режим голосования (показываем кнопки голосования если есть голоса)
+      applyVoteMode();
+      console.log('[UI] Updated element in same column', item.category);
+      // Восстанавливаем размер мема если есть
+      restoreMemeSizes();
+    } else {
+      console.log('[UI] Skipping re-render for item', item.id, '- no significant changes (reactions only)');
+    }
   }
 }
 
@@ -4823,45 +5244,88 @@ function updateItemReactions(itemId, reactions, userReactions) {
   const reactionsContainer = element.querySelector('.reactions-container');
   if (!reactionsContainer) return;
 
-  // Фильтруем активные реакции (count > 0)
-  const activeReactions = TELEGRAM_EMOJIS.filter(({ name }) => (reactions[name] || 0) > 0);
   const currentUserIdForCheck = currentUserId;
 
-  // Генерируем новый HTML для реакций
-  let reactionsHtml = '<div class="reactions-container">';
+  // Получаем dropdown (его не трогаем)
+  const existingDropdown = reactionsContainer.querySelector('.emoji-dropdown');
 
-  // Показываем выбранные смайлы
+  // Фильтруем активные реакции (count > 0)
+  const activeReactions = TELEGRAM_EMOJIS.filter(({ name }) => (reactions[name] || 0) > 0);
+
+  // Создаём мапу активных реакций
+  const activeMap = new Map();
   activeReactions.forEach(({ emoji, name }) => {
-    const count = reactions[name] || 0;
-    const isUserReaction = userReactions[currentUserIdForCheck] === name;
-    reactionsHtml += `
-      <button class="reaction-btn ${name} ${isUserReaction ? 'active' : ''}"
-              onclick="toggleReaction('${itemId}', '${emoji}', '${name}')">
-        <span>${emoji}</span>
-        <span class="reaction-count">${count}</span>
-      </button>
-    `;
+    activeMap.set(name, {
+      emoji,
+      count: reactions[name] || 0,
+      isUserReaction: userReactions[currentUserIdForCheck] === name
+    });
   });
 
-  // Dropdown для добавления реакции
-  reactionsHtml += `
-    <div class="emoji-dropdown">
-      <button class="emoji-dropdown-btn" onclick="toggleEmojiDropdown(event, '${itemId}')">
-        <span class="material-icons" style="font-size: 18px;">emoji_emotions</span>
-      </button>
-      <div class="emoji-dropdown-menu" id="emoji-menu-${itemId}">
-        <div class="emoji-grid">
-          ${TELEGRAM_EMOJIS.map(({ emoji, name }) => `
-            <span class="emoji-btn" onclick="setReaction('${itemId}', '${emoji}', '${name}')">${emoji}</span>
-          `).join('')}
-        </div>
-      </div>
-    </div>
-  `;
+  // Получаем все существующие кнопки реакций
+  const existingBtns = reactionsContainer.querySelectorAll('.reaction-btn');
 
-  reactionsHtml += '</div>';
+  // Обновляем или скрываем существующие кнопки
+  existingBtns.forEach(btn => {
+    const btnName = btn.classList.contains('like') ? 'like' :
+                    btn.classList.contains('dislike') ? 'dislike' :
+                    btn.classList.contains('heart') ? 'heart' :
+                    btn.classList.contains('fire') ? 'fire' :
+                    btn.classList.contains('party') ? 'party' :
+                    btn.classList.contains('happy') ? 'happy' :
+                    btn.classList.contains('sad') ? 'sad' :
+                    btn.classList.contains('angry') ? 'angry' :
+                    btn.classList.contains('think') ? 'think' :
+                    btn.classList.contains('poop') ? 'poop' :
+                    btn.classList.contains('hundred') ? 'hundred' :
+                    btn.classList.contains('pray') ? 'pray' : null;
 
-  reactionsContainer.outerHTML = reactionsHtml;
+    if (!btnName) return;
+
+    const activeData = activeMap.get(btnName);
+    if (activeData) {
+      // Обновляем существующую кнопку
+      const emojiSpan = btn.querySelector('span:first-child');
+      const countSpan = btn.querySelector('.reaction-count');
+      if (emojiSpan && emojiSpan.textContent !== activeData.emoji) {
+        emojiSpan.textContent = activeData.emoji;
+      }
+      if (countSpan && countSpan.textContent !== String(activeData.count)) {
+        countSpan.textContent = activeData.count;
+      }
+      const isActive = activeData.isUserReaction;
+      if (btn.classList.contains('active') !== isActive) {
+        btn.classList.toggle('active', isActive);
+      }
+      activeMap.delete(btnName); // Удаляем из мапы
+      btn.style.display = ''; // Показываем кнопку
+    } else {
+      // Скрываем кнопку (реакция больше не активна)
+      btn.style.display = 'none';
+    }
+  });
+
+  // Создаём новые кнопки для реакций которых не было
+  activeMap.forEach(({ emoji, count, isUserReaction }, name) => {
+    const newBtn = document.createElement('button');
+    newBtn.className = `reaction-btn ${name} ${isUserReaction ? 'active' : ''}`;
+    newBtn.onclick = () => toggleReaction(itemId, emoji, name);
+    newBtn.innerHTML = `<span>${emoji}</span><span class="reaction-count">${count}</span>`;
+
+    // Вставляем перед dropdown или в конец
+    if (existingDropdown) {
+      reactionsContainer.insertBefore(newBtn, existingDropdown);
+    } else {
+      reactionsContainer.appendChild(newBtn);
+    }
+  });
+
+  // Показываем/скрываем контейнер - считаем только видимые кнопки
+  let visibleCount = 0;
+  reactionsContainer.querySelectorAll('.reaction-btn').forEach(btn => {
+    if (btn.style.display !== 'none') visibleCount++;
+  });
+  reactionsContainer.style.display = (visibleCount > 0 || existingDropdown) ? 'flex' : 'none';
 }
 
 // Сортировка колонки по порядку элементов
@@ -5090,6 +5554,17 @@ function toggleHideOthersVotes(checked) {
   showToast(checked ? 'Голоса других участников скрыты' : 'Все голоса видны', 'info');
 }
 
+// Переключение скрытия голосов админа (для трансляции экрана)
+function toggleHideAdminVotes(checked) {
+  hideAdminVotes = checked;
+  // Сохраняем в localStorage для текущей сессии
+  if (currentSession) {
+    localStorage.setItem(`hideAdminVotes_${currentSession.id}`, hideAdminVotes);
+  }
+  applyVoteMode(); // Обновляем голоса голосования
+  showToast(checked ? 'Ваши голоса скрыты (для трансляции экрана)' : 'Ваши голоса видны', 'info');
+}
+
 // Переключение режима голосования
 function toggleVoteMode() {
   // Блокируем в режиме просмотра
@@ -5098,54 +5573,174 @@ function toggleVoteMode() {
     return;
   }
 
-  voteMode = !voteMode;
-
-  // Если включаем голосование - устанавливаем флаг (блокировка объединения/разъединения)
-  if (voteMode) {
-    votingStarted = true;
+  // Если включаем голосование - показываем подтверждение
+  if (!voteMode) {
+    showVoteModeConfirmModal();
+    return;
   }
 
-  // Если выключаем голосование - показываем чекбоксы админу для выбора карточек
-  if (!voteMode && votingStarted) {
-    // Перерисовываем карточки с чекбоксами
-    document.querySelectorAll('.retro-item').forEach(itemEl => {
-      const itemId = itemEl.dataset.id;
-      const item = currentSession?.items?.find(i => i.id === itemId);
-      if (item) {
-        const newHtml = createItemHtml(item);
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = newHtml;
-        const newItemEl = tempDiv.firstElementChild;
-        if (newItemEl) {
-          itemEl.replaceWith(newItemEl);
-          initDraggable(newItemEl);
-        }
+  // Если выключаем - просто выключаем
+  voteMode = false;
+  sessionEnded = true;
+  saveSession();
+
+  // Показываем чекбоксы админу для выбора карточек
+  document.querySelectorAll('.retro-item').forEach(itemEl => {
+    const itemId = itemEl.dataset.id;
+    const item = currentSession?.items?.find(i => i.id === itemId);
+    if (item) {
+      const newHtml = createItemHtml(item);
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = newHtml;
+      const newItemEl = tempDiv.firstElementChild;
+      if (newItemEl) {
+        itemEl.replaceWith(newItemEl);
+        initDraggable(newItemEl);
+      }
+    }
+  });
+
+  // Показываем вкладки
+  document.getElementById('session-tabs').style.display = 'flex';
+
+  // Отправляем на сервер
+  socket.emit('vote:mode', {
+    sessionId: currentSession.id,
+    voteMode: false,
+    sessionEnded: true
+  });
+
+  applyVoteMode();
+  showToast('Голосование завершено', 'info');
+}
+
+// Модальное окно подтверждения голосования
+function showVoteModeConfirmModal() {
+  const modal = new bootstrap.Modal(document.getElementById('voteModeConfirmModal'));
+  modal.show();
+
+  const confirmBtn = document.getElementById('confirm-start-vote-btn');
+  confirmBtn.onclick = () => {
+    startVoteMode();
+    modal.hide();
+  };
+}
+
+// Начало режима голосования (после подтверждения)
+function startVoteMode() {
+  voteMode = true;
+  votingStarted = true;
+  sessionEnded = false;
+  saveSession();
+
+  // Отправляем на сервер
+  socket.emit('vote:mode', {
+    sessionId: currentSession.id,
+    voteMode: true,
+    sessionEnded: false
+  });
+
+  // Показываем вкладки
+  document.getElementById('session-tabs').style.display = 'flex';
+
+  applyVoteMode();
+  showToast('Режим голосования включён', 'success');
+}
+
+// Сброс режима голосования
+function resetVoteMode() {
+  const modal = new bootstrap.Modal(document.getElementById('resetVoteModeModal'));
+  modal.show();
+
+  const confirmBtn = document.getElementById('confirm-reset-vote-btn');
+  confirmBtn.onclick = () => {
+    doResetVoteMode();
+    modal.hide();
+  };
+}
+
+// Выполнение сброса голосования
+function doResetVoteMode() {
+  // Сбрасываем все голоса
+  voteModeVotes = {};
+  userVoteModeVotes = [];
+  voteMode = false;
+  votingStarted = false;
+  sessionEnded = false;
+  
+  // Сбрасываем флаг в currentSession
+  if (currentSession) {
+    currentSession.sessionEnded = false;
+  }
+
+  // Сбрасываем все выбранные карточки для обсуждения
+  selectedDiscussionItems.clear();
+
+  // Сохраняем в localStorage с сброшенными флагами
+  if (currentSession) {
+    localStorage.setItem('retroSession', JSON.stringify({
+      session: currentSession,
+      userId: currentUserId,
+      isAdmin,
+      sessionEnded: false,
+      votingStarted: false
+    }));
+  }
+
+  // Отправляем на сервер для сброса
+  socket.emit('vote:reset', {
+    sessionId: currentSession.id
+  });
+
+  // Сбрасываем голоса в БД через API
+  fetch(`/api/sessions/${currentSession.id}/votes/reset`, {
+    method: 'POST'
+  }).catch(err => console.error('Error resetting votes:', err));
+
+  // Сбрасываем for_discussion у всех карточек в БД и локально
+  if (currentSession?.items) {
+    currentSession.items.forEach(item => {
+      if (item.for_discussion) {
+        item.for_discussion = false;
+        // Отправляем на сервер сброс
+        fetch(`/api/sessions/${currentSession.id}/items/${item.id}/discussion`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ for_discussion: false, userId: currentUserId })
+        }).catch(err => console.error('Error resetting discussion:', err));
       }
     });
   }
 
-  // Сохраняем в localStorage
-  saveSession();
+  // Перерисовываем карточки без кнопок голосования
+  document.querySelectorAll('.retro-item').forEach(itemEl => {
+    const itemId = itemEl.dataset.id;
+    const item = currentSession?.items?.find(i => i.id === itemId);
+    if (item) {
+      const newHtml = createItemHtml(item);
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = newHtml;
+      const newItemEl = tempDiv.firstElementChild;
+      if (newItemEl) {
+        itemEl.replaceWith(newItemEl);
+        initDraggable(newItemEl);
+      }
+    }
+  });
 
-  // Показываем вкладки если голосование было начато
-  if (votingStarted) {
-    document.getElementById('session-tabs').style.display = 'flex';
+  // Скрываем кнопки голосования
+  document.querySelectorAll('.quick-vote-btn').forEach(btn => btn.remove());
+
+  // Если мы во вкладке Обсуждение - переключаем на Brain storm
+  if (currentTab === 'discussion') {
+    switchToTab('brainstorm');
   }
 
-  // НЕ сбрасываем голоса при выключении - они остаются видимыми
-  // if (!voteMode) {
-  //   voteModeVotes = {};
-  //   userVoteModeVotes = [];
-  // }
+  // Обновляем счётчик обсуждения
+  updateDiscussionCount();
 
-  // Отправляем событие всем участникам
-  socket.emit('vote:mode', {
-    sessionId: currentSession.id,
-    voteMode,
-    sessionEnded: false // sessionEnded = true только при завершении сессии
-  });
   applyVoteMode();
-  showToast(voteMode ? 'Режим голосования включён' : 'Режим голосования выключен', 'info');
+  showToast('Голосование сброшено', 'success');
 }
 
 // Переключение между вкладками Brain storm и Обсуждение
@@ -5161,9 +5756,27 @@ function switchToTab(tabName) {
   if (tabName === 'discussion') {
     currentTab = 'discussion';
     startActionPlanAutoSave();
+
+    // Если это админ - переключаем всех пользователей на вкладку обсуждения
+    if (isAdmin && currentSession) {
+      socket.emit('tab:switch', {
+        sessionId: currentSession.id,
+        tab: 'discussion',
+        isAdmin: true
+      });
+    }
   } else {
     currentTab = 'brainstorm';
     stopActionPlanAutoSave();
+    
+    // Если это админ - переключаем всех пользователей на Brain storm
+    if (isAdmin && currentSession) {
+      socket.emit('tab:switch', {
+        sessionId: currentSession.id,
+        tab: 'brainstorm',
+        isAdmin: true
+      });
+    }
   }
 
   const brainstormContainer = document.getElementById('columns-container');
@@ -5874,8 +6487,10 @@ function applyViewSettings() {
   // Обновляем чекбоксы
   const hideCardsCheckbox = document.getElementById('hide-others-cards');
   const hideVotesCheckbox = document.getElementById('hide-others-votes');
+  const hideAdminVotesCheckbox = document.getElementById('hide-admin-votes');
   if (hideCardsCheckbox) hideCardsCheckbox.checked = hideOthersCards;
   if (hideVotesCheckbox) hideVotesCheckbox.checked = hideOthersVotes;
+  if (hideAdminVotesCheckbox) hideAdminVotesCheckbox.checked = hideAdminVotes;
 }
 
 // Применение режима голосования
@@ -5893,14 +6508,22 @@ function applyVoteMode() {
   document.querySelectorAll('.retro-item').forEach(item => {
     let voteBtn = item.querySelector('.quick-vote-btn');
     const itemId = item.dataset.id;
-    
+
+    // Проверяем условия для скрытия голосов
+    const adminHideOwnVote = hideAdminVotes && isAdmin && userVoteModeVotes.includes(itemId);
+
     // Если скрытие голосов включено, показываем только свой голос
     let voteCount = 0;
+    let showMyVoteOnly = false;
+
     if (hideOthersVotes && !isAdmin) {
-      // Показываем только если пользователь голосовал за эту карточку
+      // Обычный пользователь видит только свой голос
+      showMyVoteOnly = true;
+    }
+
+    if (showMyVoteOnly) {
       voteCount = userVoteModeVotes.includes(itemId) ? 1 : 0;
     } else {
-      // Показываем все голоса
       voteCount = voteModeVotes[itemId] || 0;
     }
 
@@ -5923,10 +6546,19 @@ function applyVoteMode() {
       }
 
       // Обновляем активное состояние
-      if (userVoteModeVotes.includes(itemId)) {
+      // Если hideAdminVotes включён и админ проголосовал - кнопка синяя вместо красной
+      const isActive = userVoteModeVotes.includes(itemId);
+      if (isActive) {
         voteBtn.classList.add('active');
+        // Если админ скрыл свой голос - меняем цвет на синий
+        if (adminHideOwnVote) {
+          voteBtn.classList.add('admin-hidden');
+        } else {
+          voteBtn.classList.remove('admin-hidden');
+        }
       } else {
         voteBtn.classList.remove('active');
+        voteBtn.classList.remove('admin-hidden');
       }
 
       // Кнопки активны только когда режим голосования включён

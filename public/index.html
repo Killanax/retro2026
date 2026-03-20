@@ -297,6 +297,10 @@
                 <input type="checkbox" id="hide-others-votes" class="form-check-input" onchange="toggleHideOthersVotes(this.checked)">
                 Скрыть голоса
               </label>
+              <label class="form-check-label form-check-label-sm" title="Скрыть голоса админа при трансляции экрана">
+                <input type="checkbox" id="hide-admin-votes" class="form-check-input" onchange="toggleHideAdminVotes(this.checked)">
+                Скрыть мой голос
+              </label>
             </div>
 
             <span class="text-white" id="user-display"></span>
@@ -398,6 +402,12 @@
                 <span class="material-icons align-middle">image</span>
                 JPG
               </button>
+
+              <h6 class="card-title mt-3">Управление голосованием</h6>
+              <button class="btn btn-outline-danger btn-sm w-100" onclick="resetVoteMode()">
+                <span class="material-icons align-middle">cancel</span>
+                Сбросить голосование
+              </button>
             </div>
           </div>
         </div>
@@ -468,7 +478,7 @@
                 <!-- Быстрая вставка мемов -->
                 <label class="form-label mt-3">Вставить мем:</label>
                 <div class="meme-preview-container" id="text-tab-memes-container">
-                  <img src="https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh" class="meme-preview" onclick="insertMeme('https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh', 'Meme')" title="Meme">
+                  <img src="https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh" class="meme-preview" onclick="insertMeme('https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh', 'Meme')" title="Meme" oncontextmenu="showMemeContextMenu(event, this.src, 'global')">
                 </div>
                 <button type="button" class="btn btn-primary btn-sm mt-2" onclick="openAddMemeModal()">
                   <span class="material-icons" style="font-size: 16px; vertical-align: middle;">add</span>
@@ -558,13 +568,22 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
+          <div class="alert alert-warning" id="meme-warning-alert" style="display:none;">
+            <strong>⚠️ Внимание!</strong> Мемы из Instagram, Facebook и некоторых других сайтов могут не отображаться из-за ограничений hotlinking.
+            <br><br>
+            <strong>Решение:</strong> Используйте опцию "Загрузить через прокси" или сохраните изображение и загрузите на другой хостинг.
+          </div>
           <div class="mb-3">
             <label class="form-label">Название мема</label>
             <input type="text" class="form-control" id="meme-name" placeholder="Например: This is Fine">
           </div>
           <div class="mb-3">
             <label class="form-label">URL изображения</label>
-            <input type="text" class="form-control" id="meme-url" placeholder="https://...">
+            <input type="text" class="form-control" id="meme-url" placeholder="https://..." oninput="checkMemeUrl()">
+          </div>
+          <div class="mb-3 form-text">
+            <span class="material-icons" style="font-size: 14px; vertical-align: middle;">info</span>
+            Для мемов из Instagram используйте опцию <strong>"Загрузить через прокси"</strong>
           </div>
           <div class="mb-3">
             <label class="form-label">Список мемов (долгое нажатие для удаления)</label>
@@ -574,6 +593,7 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-outline-primary" onclick="addMemeViaProxy()">Загрузить через прокси</button>
           <button type="button" class="btn btn-primary" onclick="addCustomMeme()">Добавить</button>
         </div>
       </div>
@@ -588,9 +608,72 @@
           <h5 class="modal-title">Удалить мем?</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
+        <div class="modal-body">
+          <p id="delete-meme-message">Вы уверены?</p>
+          <input type="hidden" id="delete-meme-url">
+          <input type="hidden" id="delete-meme-type">
+        </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
           <button type="button" class="btn btn-danger" id="confirm-delete-meme-btn">Удалить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно подтверждения голосования -->
+  <div class="modal fade" id="voteModeConfirmModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <span class="material-icons me-2">warning</span>
+            Начало голосования
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-warning">
+            <strong>⚠️ Внимание!</strong>
+            <p class="mb-0">После начала голосования карточки нельзя будет объединять и разъединять.</p>
+          </div>
+          <p>Вы уверены, что хотите начать голосование?</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-success" id="confirm-start-vote-btn">
+            <span class="material-icons" style="font-size: 16px; vertical-align: middle;">thumb_up</span>
+            Начать голосование
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно сброса голосования -->
+  <div class="modal fade" id="resetVoteModeModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <span class="material-icons me-2">warning</span>
+            Сброс голосования
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-warning">
+            <strong>⚠️ Внимание!</strong>
+            <p class="mb-0">Отмена голосования сбросит все голоса, но карточки можно будет объединять и разъединять.</p>
+          </div>
+          <p>Вы уверены, что хотите сбросить голосование?</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-danger" id="confirm-reset-vote-btn">
+            <span class="material-icons" style="font-size: 16px; vertical-align: middle;">cancel</span>
+            Сбросить голосование
+          </button>
         </div>
       </div>
     </div>
