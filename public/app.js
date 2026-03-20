@@ -6809,7 +6809,7 @@ async function exportResults(format) {
 </head>
 <body>
   <h1>🎯 Ретроспектива: ${escapeHtml(currentSession.name)}</h1>
-  
+
   <div class="session-info">
     <p><strong>ID:</strong> ${currentSession.id}<br>
     <strong>Дата:</strong> ${new Date(currentSession.created_at).toLocaleString()}<br>
@@ -6873,7 +6873,7 @@ async function exportResults(format) {
 
         // Используем кастомный заголовок если есть, иначе название из шаблона
         const columnHeader = columnHeaders[col.category] || col.name;
-        
+
         console.log('[Export] Column:', col.category, 'columnHeader:', columnHeader, 'col.name:', col.name, 'columnHeaders:', columnHeaders);
 
         html += `      <div class="column">
@@ -6899,10 +6899,10 @@ async function exportResults(format) {
           // Реакции
           if (item.reactions) {
             const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
-            const emojiMap = { 
-              'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉', 
-              'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩', 
-              'hundred':'💯', 'pray':'🙏', 'laugh':'🤣', 'love':'😍', 'surprised':'😮' 
+            const emojiMap = {
+              'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉',
+              'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩',
+              'hundred':'💯', 'pray':'🙏', 'laugh':'🤣', 'love':'😍', 'surprised':'😮'
             };
             const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
             if (activeReactions.length > 0) {
@@ -6916,8 +6916,8 @@ async function exportResults(format) {
 
           // Голоса голосования (круглые красные лайки)
           if (item.vote_mode_votes) {
-            const voteCount = typeof item.vote_mode_votes === 'string' ? 
-              JSON.parse(item.vote_mode_votes).length : 
+            const voteCount = typeof item.vote_mode_votes === 'string' ?
+              JSON.parse(item.vote_mode_votes).length :
               (Array.isArray(item.vote_mode_votes) ? item.vote_mode_votes.length : 0);
             if (voteCount > 0) {
               html += `          <div class="reactions">\n`;
@@ -6958,7 +6958,7 @@ async function exportResults(format) {
 
       discussionItems.forEach(item => {
         const categoryClass = `template-${templateName}-${item.category}`;
-        
+
         // Получаем название колонки с учётом кастомных заголовков (как в Brain Storm)
         let columnHeader = columnHeaders[item.category];
         if (!columnHeader && allColumns) {
@@ -7014,7 +7014,7 @@ async function exportResults(format) {
           }
           html += `        </div>\n`;
         }
-        
+
         html += `      </div>\n`;
       });
 
@@ -7029,6 +7029,721 @@ async function exportResults(format) {
 
       const blob = new Blob([html], { type: 'text/html' });
       downloadBlob(blob, `retro-${currentSession.id}-confluence.html`);
+    } else if (format === 'confluence_multi') {
+      // Confluence экспорт - каждый столбец в отдельный файл в формате Wiki Markup
+      const columnHeaders = currentSession.column_headers || {};
+
+      console.log('[Export Multi] Column headers:', columnHeaders);
+      console.log('[Export Multi] Template columns:', currentSession.template_columns);
+
+      const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
+      const templateName = currentSession.template;
+
+      // Собираем все колонки
+      let allColumns = [...template.columns];
+
+      if (currentSession.template_columns && currentSession.template_columns.trim() !== '') {
+        try {
+          const templateColumns = typeof currentSession.template_columns === 'string'
+            ? JSON.parse(currentSession.template_columns)
+            : currentSession.template_columns;
+          allColumns = templateColumns;
+          console.log('[Export Multi] Using template_columns:', allColumns);
+        } catch (e) {
+          console.error('Error parsing template_columns:', e);
+        }
+      }
+
+      if (currentSession.customColumns && currentSession.customColumns.length > 0) {
+        currentSession.customColumns.forEach(customCol => {
+          if (!allColumns.find(col => col.category === customCol.category)) {
+            allColumns.push({
+              id: customCol.id,
+              name: customCol.name,
+              category: customCol.category,
+              icon: customCol.icon || 'add_column'
+            });
+          }
+        });
+      }
+
+      // Функция для экранирования XML
+      function escapeXml(text) {
+        if (!text) return '';
+        return String(text)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&apos;');
+      }
+
+      // Функция для генерации Wiki Markup для одной колонки
+      function generateColumnWiki(col, colItems, columnHeader, isDiscussion = false) {
+        let wiki = `h1. ${isDiscussion ? '💬 Обсуждение' : '🧠 Brain Storm'}: ${columnHeader}\n\n`;
+
+        if (colItems.length === 0) {
+          wiki += `_Нет карточек в этой колонке_\n\n`;
+        } else {
+          colItems.forEach((item, idx) => {
+            wiki += `h2. ${idx + 1}. Карточка от ${escapeXml(item.author)}\n\n`;
+
+            // Содержимое карточки
+            const isMerged = item.text && item.text.includes('─────────────');
+            let mergedPartsData = null;
+            if (item.merged_parts_data) {
+              try {
+                mergedPartsData = typeof item.merged_parts_data === 'string'
+                  ? JSON.parse(item.merged_parts_data)
+                  : item.merged_parts_data;
+              } catch (e) {
+                console.error('[Export] Failed to parse merged_parts_data:', e);
+              }
+            }
+
+            if (isMerged) {
+              const parts = item.text.split(/\n{1,2}─────────────\n{1,2}/).filter(p => p.trim());
+              if (mergedPartsData && mergedPartsData.length > 0) {
+                mergedPartsData.forEach((part, index) => {
+                  const partText = part.text || parts[index] || '';
+                  const partMemeMatch = partText.match(/!\[(.*?)\]\((.*?)\)/);
+                  if (partMemeMatch) {
+                    wiki += `!${escapeXml(partMemeMatch[2])}!\n\n`;
+                    const remainingText = partText.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
+                    if (remainingText) {
+                      wiki += `# ${index + 1}. ${escapeXml(remainingText)}\n\n`;
+                    }
+                  } else if (partText.startsWith('😄') || partText.startsWith('😊') || partText.startsWith('😐') || partText.startsWith('😫') || partText.startsWith('💀')) {
+                    wiki += `h3. ${escapeXml(partText)}\n\n`;
+                  } else {
+                    wiki += `# ${index + 1}. ${escapeXml(partText)}\n\n`;
+                  }
+                });
+                wiki += `_(${parts.length} частей в объединённой карточке)_\n\n`;
+              } else {
+                parts.forEach((part, index) => {
+                  const partMemeMatch = part.match(/!\[(.*?)\]\((.*?)\)/);
+                  if (partMemeMatch) {
+                    wiki += `!${escapeXml(partMemeMatch[2])}!\n\n`;
+                    const remainingText = part.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
+                    if (remainingText) {
+                      wiki += `# ${index + 1}. ${escapeXml(remainingText)}\n\n`;
+                    }
+                  } else if (part.startsWith('😄') || part.startsWith('😊') || part.startsWith('😐') || part.startsWith('😫') || part.startsWith('💀')) {
+                    wiki += `h3. ${escapeXml(part)}\n\n`;
+                  } else {
+                    wiki += `# ${index + 1}. ${escapeXml(part)}\n\n`;
+                  }
+                });
+                wiki += `_(${parts.length} частей в объединённой карточке)_\n\n`;
+              }
+            } else if (item.meme_url) {
+              wiki += `!${escapeXml(item.meme_url)}!\n\n`;
+            } else if (item.text) {
+              const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/g);
+              if (markdownMemeMatch && markdownMemeMatch.length > 0) {
+                markdownMemeMatch.forEach(match => {
+                  const [, alt, url] = match.match(/!\[(.*?)\]\((.*?)\)/);
+                  wiki += `!${escapeXml(url)}!\n\n`;
+                });
+                const remainingText = item.text.replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
+                if (remainingText) {
+                  wiki += `${escapeXml(remainingText)}\n\n`;
+                }
+              } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
+                wiki += `h3. ${escapeXml(item.text)}\n\n`;
+              } else {
+                wiki += `${escapeXml(item.text)}\n\n`;
+              }
+            }
+
+            // Реакции
+            if (item.reactions) {
+              const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
+              const emojiMap = {
+                'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉',
+                'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩',
+                'hundred':'💯', 'pray':'🙏', 'laugh':'🤣', 'love':'😍', 'surprised':'😮'
+              };
+              const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
+              if (activeReactions.length > 0) {
+                wiki += `*Реакции:* `;
+                wiki += activeReactions.map(([name, count]) => `${emojiMap[name] || name} ${count}`).join('  ');
+                wiki += `\n\n`;
+              }
+            }
+
+            // Голоса голосования
+            if (item.vote_mode_votes) {
+              const voteCount = typeof item.vote_mode_votes === 'string' ?
+                JSON.parse(item.vote_mode_votes).length :
+                (Array.isArray(item.vote_mode_votes) ? item.vote_mode_votes.length : 0);
+              if (voteCount > 0) {
+                wiki += `*Голоса:* 👍 ${voteCount}\n\n`;
+              }
+            }
+
+            // План действий (только для обсуждения)
+            if (isDiscussion && (item.action_plan_text || item.action_plan_who || item.action_plan_when)) {
+              wiki += `----\n\n`;
+              wiki += `h2. 📋 План действий\n\n`;
+              if (item.action_plan_text) {
+                wiki += `*Текст:*\n\n${escapeXml(item.action_plan_text)}\n\n`;
+              }
+              if (item.action_plan_who) {
+                wiki += `*👤 Кому:* ${escapeXml(item.action_plan_who)}\n\n`;
+              }
+              if (item.action_plan_when) {
+                wiki += `*📅 Когда:* ${escapeXml(item.action_plan_when)}\n\n`;
+              }
+            }
+
+            wiki += `----\n\n`;
+          });
+        }
+        return wiki;
+      }
+
+      // Экспортируем каждую колонку Brain Storm в отдельный файл
+      allColumns.forEach((col, index) => {
+        const colItems = items.filter(i => i.category === col.category);
+        const columnHeader = columnHeaders[col.category] || col.name;
+        const wiki = generateColumnWiki(col, colItems, columnHeader, false);
+        const blob = new Blob([wiki], { type: 'text/plain' });
+        const filename = `brainstorm-${index + 1}.txt`;
+        downloadBlob(blob, filename);
+      });
+
+      // Экспортируем обсуждение - каждая карточка в отдельный файл
+      const discussionItems = items.filter(i => i.for_discussion);
+      discussionItems.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+      discussionItems.forEach((item, index) => {
+        const columnHeader = columnHeaders[item.category] ||
+          (allColumns ? allColumns.find(c => c.category === item.category)?.name : null) ||
+          template.columns.find(c => c.category === item.category)?.name ||
+          item.category;
+
+        const colForItem = allColumns.find(c => c.category === item.category) || { category: item.category, name: columnHeader };
+        const wiki = generateColumnWiki(colForItem, [item], columnHeader, true);
+        const blob = new Blob([wiki], { type: 'text/plain' });
+        const filename = `discussion-${index + 1}.txt`;
+        downloadBlob(blob, filename);
+      });
+
+      // Экспортируем шапку сессии в отдельный файл
+      let headerWiki = `h1. 🎯 Ретроспектива: ${escapeXml(currentSession.name)}\n\n`;
+      headerWiki += `h2. 📋 Основная информация\n\n`;
+      headerWiki += `|| Параметр || Значение ||\n`;
+      headerWiki += `| *ID* | ${currentSession.id} |\n`;
+      headerWiki += `| *Дата создания* | ${new Date(currentSession.created_at).toLocaleString()} |\n`;
+      headerWiki += `| *Статус* | ${currentSession.status} |\n`;
+      headerWiki += `| *Шаблон* | ${currentSession.template} |\n`;
+      headerWiki += `| *Ведущий* | ${escapeXml(currentSession.admin_name)} |\n\n`;
+
+      headerWiki += `h2. 🧠 Колонки Brain Storm\n\n`;
+      headerWiki += `|| # || Название || Категория ||\n`;
+      allColumns.forEach((col, index) => {
+        const columnHeader = columnHeaders[col.category] || col.name;
+        headerWiki += `| ${index + 1} | ${escapeXml(columnHeader)} | ${col.category} |\n`;
+      });
+      headerWiki += `\n`;
+
+      headerWiki += `h2. 💬 Обсуждение\n\n`;
+      headerWiki += `Всего карточек для обсуждения: *${discussionItems.length}*\n\n`;
+
+      headerWiki += `h2. 📁 Структура экспортированных файлов\n\n`;
+      headerWiki += `* *brainstorm-1, 2, 3...* - файлы колонок Brain Storm\n`;
+      headerWiki += `* *discussion-1, 2, 3...* - файлы карточек обсуждения\n`;
+      headerWiki += `* *shapka* - этот файл с общей информацией\n`;
+
+      const headerBlob = new Blob([headerWiki], { type: 'text/plain' });
+      downloadBlob(headerBlob, `shapka.txt`);
+
+      const totalFiles = allColumns.length + discussionItems.length + 1;
+      showToast(`Экспорт выполнен! Скачано файлов: ${totalFiles}`, 'success');
+    } else if (format === 'jpg') {
+      // Экспорт в JPG - скриншоты вкладок Brain Storm и Обсуждение
+      // Используем html2canvas для создания скриншотов
+      
+      const columnHeaders = currentSession.column_headers || {};
+      const template = TEMPLATES[currentSession.template] || TEMPLATES['freeform'];
+      const templateName = currentSession.template;
+
+      // Собираем все колонки
+      let allColumns = [...template.columns];
+
+      if (currentSession.template_columns && currentSession.template_columns.trim() !== '') {
+        try {
+          const templateColumns = typeof currentSession.template_columns === 'string'
+            ? JSON.parse(currentSession.template_columns)
+            : currentSession.template_columns;
+          allColumns = templateColumns;
+        } catch (e) {
+          console.error('Error parsing template_columns:', e);
+        }
+      }
+
+      if (currentSession.customColumns && currentSession.customColumns.length > 0) {
+        currentSession.customColumns.forEach(customCol => {
+          if (!allColumns.find(col => col.category === customCol.category)) {
+            allColumns.push({
+              id: customCol.id,
+              name: customCol.name,
+              category: customCol.category,
+              icon: customCol.icon || 'add_column'
+            });
+          }
+        });
+      }
+
+      // Функция для создания HTML для скриншота
+      function createScreenshotHtml(title, content) {
+        return `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <title>${title}</title>
+            <style>
+              body { font-family: Arial, sans-serif; padding: 40px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
+              .container { max-width: 1400px; margin: 0 auto; }
+              h1 { color: white; text-align: center; font-size: 2.5rem; margin-bottom: 30px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+              .columns-container { display: flex; gap: 20px; flex-wrap: wrap; }
+              .column { flex: 1; min-width: 280px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+              .column-header { padding: 12px 16px; border-radius: 8px; margin-bottom: 15px; text-align: center; color: white; font-weight: bold; font-size: 1.1rem; }
+              .header-template-classic-start { background: linear-gradient(135deg, #10b981, #059669); }
+              .header-template-classic-stop { background: linear-gradient(135deg, #ef4444, #dc2626); }
+              .header-template-classic-continue { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+              .header-template-mad-sad-glad-mad { background: linear-gradient(135deg, #ef4444, #dc2626); }
+              .header-template-mad-sad-glad-sad { background: linear-gradient(135deg, #f59e0b, #d97706); }
+              .header-template-mad-sad-glad-glad { background: linear-gradient(135deg, #10b981, #059669); }
+              .header-template-good-bad-ideas-good { background: linear-gradient(135deg, #10b981, #059669); }
+              .header-template-good-bad-ideas-bad { background: linear-gradient(135deg, #ef4444, #dc2626); }
+              .header-template-good-bad-ideas-ideas { background: linear-gradient(135deg, #f59e0b, #d97706); }
+              .header-template-kiss-keep { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+              .header-template-kiss-improve { background: linear-gradient(135deg, #f59e0b, #d97706); }
+              .header-template-kiss-start { background: linear-gradient(135deg, #10b981, #059669); }
+              .header-template-kiss-stop { background: linear-gradient(135deg, #ef4444, #dc2626); }
+              .header-template-sailboat-wind { background: linear-gradient(135deg, #06b6d4, #0891b2); }
+              .header-template-sailboat-anchor { background: linear-gradient(135deg, #f59e0b, #d97706); }
+              .header-template-sailboat-rocks { background: linear-gradient(135deg, #6b7280, #4b5563); }
+              .header-template-sailboat-island { background: linear-gradient(135deg, #10b981, #059669); }
+              .header-template-freeform-general { background: linear-gradient(135deg, #6366f1, #4f46e5); }
+              .column-header[class*="header-template-freeform-"] { background: linear-gradient(135deg, #6366f1, #4f46e5); }
+              .card { padding: 15px; margin: 12px 0; border-radius: 10px; border-left: 5px solid; background: #f9fafb; }
+              .card-content { margin: 10px 0; word-wrap: break-word; color: #1f2937; }
+              .card-meme { max-width: 100%; max-height: 200px; border-radius: 8px; margin: 8px 0; }
+              .card-emoji { font-size: 3rem; text-align: center; margin: 10px 0; }
+              .reactions { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
+              .reaction { background: #e5e7eb; padding: 5px 12px; border-radius: 20px; font-size: 0.9rem; display: flex; align-items: center; gap: 4px; }
+              .vote-reaction { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; padding: 6px 14px; border-radius: 50%; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 4px; min-width: 40px; justify-content: center; }
+              .card.template-classic-start { background: linear-gradient(135deg, #d1fae5, #a7f3d0); border-left-color: #10b981; }
+              .card.template-classic-stop { background: linear-gradient(135deg, #fee2e2, #fecaca); border-left-color: #ef4444; }
+              .card.template-classic-continue { background: linear-gradient(135deg, #dbeafe, #bfdbfe); border-left-color: #3b82f6; }
+              .card.template-mad-sad-glad-mad { background: linear-gradient(135deg, #fee2e2, #fecaca); border-left-color: #ef4444; }
+              .card.template-mad-sad-glad-sad { background: linear-gradient(135deg, #fef3c7, #fde68a); border-left-color: #f59e0b; }
+              .card.template-mad-sad-glad-glad { background: linear-gradient(135deg, #d1fae5, #a7f3d0); border-left-color: #10b981; }
+              .card.template-good-bad-ideas-good { background: linear-gradient(135deg, #d1fae5, #a7f3d0); border-left-color: #10b981; }
+              .card.template-good-bad-ideas-bad { background: linear-gradient(135deg, #fee2e2, #fecaca); border-left-color: #ef4444; }
+              .card.template-good-bad-ideas-ideas { background: linear-gradient(135deg, #fef3c7, #fde68a); border-left-color: #f59e0b; }
+              .card.template-kiss-keep { background: linear-gradient(135deg, #dbeafe, #bfdbfe); border-left-color: #3b82f6; }
+              .card.template-kiss-improve { background: linear-gradient(135deg, #fef3c7, #fde68a); border-left-color: #f59e0b; }
+              .card.template-kiss-start { background: linear-gradient(135deg, #d1fae5, #a7f3d0); border-left-color: #10b981; }
+              .card.template-kiss-stop { background: linear-gradient(135deg, #fee2e2, #fecaca); border-left-color: #ef4444; }
+              .card.template-sailboat-wind { background: linear-gradient(135deg, #cffafe, #a5f3fc); border-left-color: #06b6d4; }
+              .card.template-sailboat-anchor { background: linear-gradient(135deg, #fef3c7, #fde68a); border-left-color: #f59e0b; }
+              .card.template-sailboat-rocks { background: linear-gradient(135deg, #f3f4f6, #e5e7eb); border-left-color: #6b7280; }
+              .card.template-sailboat-island { background: linear-gradient(135deg, #d1fae5, #a7f3d0); border-left-color: #10b981; }
+              .card.template-freeform-general { background: linear-gradient(135deg, #e0e7ff, #c7d2fe); border-left-color: #6366f1; }
+              .author-info { font-size: 0.8rem; color: #6b7280; margin-bottom: 8px; }
+              .author-info strong { color: #4b5563; }
+              .action-plan { background: linear-gradient(135deg, #e0e7ff, #c7d2fe); border: 2px solid #6366f1; border-radius: 8px; padding: 12px; margin-top: 10px; }
+              .action-plan-header { color: #6366f1; font-weight: bold; margin-bottom: 8px; }
+              .discussion-single-column { display: block; }
+              .discussion-item-container { display: flex; gap: 20px; margin-bottom: 20px; align-items: flex-start; }
+              .discussion-card-left { flex: 0 0 45%; max-width: 45%; }
+              .discussion-plan-right { flex: 1; background: linear-gradient(135deg, #e0e7ff, #c7d2fe); border: 2px solid #6366f1; border-radius: 8px; padding: 15px; }
+              .discussion-plan-header { color: #6366f1; font-weight: bold; margin-bottom: 10px; font-size: 1rem; }
+              .card.discussion-card { background: linear-gradient(135deg, #fef3c7, #fde68a); border-left-color: #f59e0b !important; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>${title}</h1>
+              ${content}
+            </div>
+          </body>
+          </html>
+        `;
+      }
+
+      // Генерация содержимого для Brain Storm
+      function generateBrainStormContent() {
+        let content = '<div class="columns-container">\n';
+        
+        allColumns.forEach(col => {
+          const colItems = items.filter(i => i.category === col.category);
+          const columnHeader = columnHeaders[col.category] || col.name;
+          const categoryClass = `template-${templateName}-${col.category}`;
+          const headerClass = `header-${templateName}-${col.category.replace(/\s+/g, '-').toLowerCase()}`;
+
+          content += `  <div class="column">\n`;
+          content += `    <div class="column-header ${headerClass}">${escapeHtml(columnHeader)}</div>\n`;
+
+          if (colItems.length === 0) {
+            content += `    <p style="color: #999; text-align: center; padding: 20px;">Нет карточек</p>\n`;
+          } else {
+            colItems.forEach(item => {
+              content += `    <div class="card ${categoryClass}">\n`;
+              content += `      <div class="author-info">\n`;
+              content += `        <strong>👤 ${escapeHtml(item.author)}</strong> | 📅 ${new Date(item.created_at).toLocaleString()}\n`;
+              content += `      </div>\n`;
+              content += `      <div class="card-content">\n`;
+              
+              // Содержимое карточки
+              const isMerged = item.text && item.text.includes('─────────────');
+              if (isMerged) {
+                const parts = item.text.split(/\n{1,2}─────────────\n{1,2}/).filter(p => p.trim());
+                parts.forEach((part, index) => {
+                  const partMemeMatch = part.match(/!\[(.*?)\]\((.*?)\)/);
+                  if (partMemeMatch) {
+                    content += `<img src="${escapeHtml(partMemeMatch[2])}" class="card-meme">\n`;
+                  } else if (part.startsWith('😄') || part.startsWith('😊') || part.startsWith('😐') || part.startsWith('😫') || part.startsWith('💀')) {
+                    content += `<div class="card-emoji">${escapeHtml(part)}</div>\n`;
+                  } else {
+                    content += `<p>${escapeHtml(part)}</p>\n`;
+                  }
+                });
+              } else if (item.meme_url) {
+                content += `<img src="${escapeHtml(item.meme_url)}" class="card-meme">\n`;
+              } else if (item.text) {
+                const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/g);
+                if (markdownMemeMatch) {
+                  markdownMemeMatch.forEach(match => {
+                    const [, alt, url] = match.match(/!\[(.*?)\]\((.*?)\)/);
+                    content += `<img src="${escapeHtml(url)}" class="card-meme">\n`;
+                  });
+                } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
+                  content += `<div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
+                } else {
+                  content += `<p>${escapeHtml(item.text)}</p>\n`;
+                }
+              }
+              
+              content += `      </div>\n`;
+
+              // Реакции
+              if (item.reactions) {
+                const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
+                const emojiMap = {
+                  'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉',
+                  'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩',
+                  'hundred':'💯', 'pray':'🙏', 'laugh':'🤣', 'love':'😍', 'surprised':'😮'
+                };
+                const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
+                if (activeReactions.length > 0) {
+                  content += `      <div class="reactions">\n`;
+                  activeReactions.forEach(([name, count]) => {
+                    content += `        <span class="reaction">${emojiMap[name] || name} ${count}</span>\n`;
+                  });
+                  content += `      </div>\n`;
+                }
+              }
+
+              // Голоса голосования
+              if (item.vote_mode_votes) {
+                const voteCount = typeof item.vote_mode_votes === 'string' ?
+                  JSON.parse(item.vote_mode_votes).length :
+                  (Array.isArray(item.vote_mode_votes) ? item.vote_mode_votes.length : 0);
+                if (voteCount > 0) {
+                  content += `      <div class="reactions">\n`;
+                  content += `        <span class="vote-reaction">👍 ${voteCount}</span>\n`;
+                  content += `      </div>\n`;
+                }
+              }
+
+              content += `    </div>\n`;
+            });
+          }
+
+          content += `  </div>\n`;
+        });
+
+        content += '</div>\n';
+        return content;
+      }
+
+      // Генерация содержимого для Обсуждения
+      function generateDiscussionContent() {
+        const discussionItems = items.filter(i => i.for_discussion);
+        discussionItems.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+        let content = '<div class="discussion-single-column">\n';
+
+        if (discussionItems.length === 0) {
+          content += '<p style="color: #999; text-align: center; padding: 40px;">Нет карточек для обсуждения</p>\n';
+        } else {
+          discussionItems.forEach((item, idx) => {
+            const columnHeader = columnHeaders[item.category] ||
+              (allColumns ? allColumns.find(c => c.category === item.category)?.name : null) ||
+              template.columns.find(c => c.category === item.category)?.name ||
+              item.category;
+            const categoryClass = `template-${templateName}-${item.category}`;
+
+            content += `<div class="discussion-item-container">\n`;
+            
+            // Левая колонка - карточка
+            content += `  <div class="discussion-card-left">\n`;
+            content += `    <div class="card discussion-card ${categoryClass}">\n`;
+            content += `      <div class="author-info">\n`;
+            content += `        <strong>👤 ${escapeHtml(item.author)}</strong> | 📅 ${new Date(item.created_at).toLocaleString()}\n`;
+            content += `      </div>\n`;
+            content += `      <div class="card-content">\n`;
+            
+            const isMerged = item.text && item.text.includes('─────────────');
+            if (isMerged) {
+              const parts = item.text.split(/\n{1,2}─────────────\n{1,2}/).filter(p => p.trim());
+              parts.forEach((part, index) => {
+                const partMemeMatch = part.match(/!\[(.*?)\]\((.*?)\)/);
+                if (partMemeMatch) {
+                  content += `<img src="${escapeHtml(partMemeMatch[2])}" class="card-meme">\n`;
+                } else if (part.startsWith('😄') || part.startsWith('😊') || part.startsWith('😐') || part.startsWith('😫') || part.startsWith('💀')) {
+                  content += `<div class="card-emoji">${escapeHtml(part)}</div>\n`;
+                } else {
+                  content += `<p>${escapeHtml(part)}</p>\n`;
+                }
+              });
+            } else if (item.meme_url) {
+              content += `<img src="${escapeHtml(item.meme_url)}" class="card-meme">\n`;
+            } else if (item.text) {
+              const markdownMemeMatch = item.text.match(/!\[(.*?)\]\((.*?)\)/g);
+              if (markdownMemeMatch) {
+                markdownMemeMatch.forEach(match => {
+                  const [, alt, url] = match.match(/!\[(.*?)\]\((.*?)\)/);
+                  content += `<img src="${escapeHtml(url)}" class="card-meme">\n`;
+                });
+              } else if (item.text.startsWith('😄') || item.text.startsWith('😊') || item.text.startsWith('😐') || item.text.startsWith('😫') || item.text.startsWith('💀')) {
+                content += `<div class="card-emoji">${escapeHtml(item.text)}</div>\n`;
+              } else {
+                content += `<p>${escapeHtml(item.text)}</p>\n`;
+              }
+            }
+            
+            content += `      </div>\n`;
+
+            if (item.reactions) {
+              const reactions = typeof item.reactions === 'string' ? JSON.parse(item.reactions) : item.reactions;
+              const emojiMap = {
+                'like':'👍', 'dislike':'👎', 'heart':'❤️', 'fire':'🔥', 'party':'🎉',
+                'happy':'😄', 'sad':'😢', 'angry':'😡', 'think':'🤔', 'poop':'💩',
+                'hundred':'💯', 'pray':'🙏', 'laugh':'🤣', 'love':'😍', 'surprised':'😮'
+              };
+              const activeReactions = Object.entries(reactions).filter(([_, count]) => count > 0);
+              if (activeReactions.length > 0) {
+                content += `      <div class="reactions">\n`;
+                activeReactions.forEach(([name, count]) => {
+                  content += `        <span class="reaction">${emojiMap[name] || name} ${count}</span>\n`;
+                });
+                content += `      </div>\n`;
+              }
+            }
+
+            if (item.vote_mode_votes) {
+              const voteCount = typeof item.vote_mode_votes === 'string' ?
+                JSON.parse(item.vote_mode_votes).length :
+                (Array.isArray(item.vote_mode_votes) ? item.vote_mode_votes.length : 0);
+              if (voteCount > 0) {
+                content += `      <div class="reactions">\n`;
+                content += `        <span class="vote-reaction">👍 ${voteCount}</span>\n`;
+                content += `      </div>\n`;
+              }
+            }
+
+            content += `    </div>\n`;
+            content += `  </div>\n`;
+
+            // Правая колонка - План действий
+            if (item.action_plan_text || item.action_plan_who || item.action_plan_when) {
+              content += `  <div class="discussion-plan-right">\n`;
+              content += `    <div class="discussion-plan-header">📋 План действий</div>\n`;
+              if (item.action_plan_text) {
+                content += `    <p><strong>Текст:</strong><br>${item.action_plan_text}</p>\n`;
+              }
+              if (item.action_plan_who) {
+                content += `    <p><strong>👤 Кому:</strong> ${escapeHtml(item.action_plan_who)}</p>\n`;
+              }
+              if (item.action_plan_when) {
+                content += `    <p><strong>📅 Когда:</strong> ${escapeHtml(item.action_plan_when)}</p>\n`;
+              }
+              content += `  </div>\n`;
+            }
+
+            content += `</div>\n`;
+          });
+        }
+
+        content += '</div>\n';
+        return content;
+      }
+
+      // Создаём iframe для рендеринга HTML и последующего скриншота
+      const brainstormHtml = createScreenshotHtml(`🧠 Brain Storm - ${escapeHtml(currentSession.name)}`, generateBrainStormContent());
+      const discussionHtml = createScreenshotHtml(`💬 Обсуждение - ${escapeHtml(currentSession.name)}`, generateDiscussionContent());
+
+      // Функция для конвертации HTML в JPG
+      function htmlToJpg(html, filename) {
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.left = '-9999px';
+        iframe.style.width = '1500px';
+        iframe.style.height = '3000px';
+        document.body.appendChild(iframe);
+
+        iframe.contentWindow.document.open();
+        iframe.contentWindow.document.write(html);
+        iframe.contentWindow.document.close();
+
+        // Ждём загрузки и делаем скриншот
+        setTimeout(() => {
+          html2canvas(iframe.contentWindow.document.body, {
+            scale: 2,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: '#667eea'
+          }).then(canvas => {
+            canvas.toBlob(blob => {
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = filename;
+              a.click();
+              URL.revokeObjectURL(url);
+              document.body.removeChild(iframe);
+            }, 'image/jpeg', 0.9);
+          }).catch(err => {
+            console.error('Error creating screenshot:', err);
+            showToast('Ошибка создания скриншота', 'danger');
+            document.body.removeChild(iframe);
+          });
+        }, 500);
+      }
+
+      // Функция для генерации HTML отчёта Action Points в виде таблицы
+      function generateActionPointsHtml() {
+        const discussionItems = items.filter(i => i.for_discussion && (i.action_plan_text || i.action_plan_who || i.action_plan_when));
+        discussionItems.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+        let html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Action Points - ${escapeHtml(currentSession.name)}</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 40px; background: #f5f5f5; }
+    .container { max-width: 1400px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    h1 { color: #6366f1; border-bottom: 3px solid #6366f1; padding-bottom: 15px; margin-bottom: 30px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th { background: linear-gradient(135deg, #6366f1, #4f46e5); color: white; padding: 15px 12px; text-align: left; font-weight: bold; font-size: 0.95rem; }
+    td { padding: 15px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size: 0.9rem; }
+    tr:nth-child(even) { background-color: #f9fafb; }
+    tr:hover { background-color: #f3f4f6; }
+    .card-text { color: #1f2937; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px dashed #d1d5db; }
+    .plan-text { color: #4b5563; margin: 15px 0; white-space: pre-line; }
+    .responsible { color: #4f46e5; font-weight: bold; margin-top: 15px; }
+    .due-date { color: #dc2626; font-weight: bold; margin-top: 10px; }
+    .item-number { background: #6366f1; color: white; width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 10px; }
+    .status-cell { width: 150px; text-align: center; }
+    .status-todo { background: #d1fae5; color: #059669; padding: 6px 16px; border-radius: 20px; font-weight: bold; display: inline-block; }
+    .comment-cell { width: 200px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📋 Action Points - ${escapeHtml(currentSession.name)}</h1>
+    <table>
+      <thead>
+        <tr>
+          <th>Responsible, Description, Due Date</th>
+          <th style="width: 150px;">Status</th>
+          <th style="width: 200px;">Comment</th>
+        </tr>
+      </thead>
+      <tbody>
+`;
+
+        discussionItems.forEach((item, idx) => {
+          const columnHeader = columnHeaders[item.category] ||
+            (allColumns ? allColumns.find(c => c.category === item.category)?.name : null) ||
+            template.columns.find(c => c.category === item.category)?.name ||
+            item.category;
+
+          // Текст карточки из Brain Storm
+          let cardText = '';
+          if (item.text) {
+            cardText = item.text.replace(/─────────────/g, '\n').replace(/!\[(.*?)\]\((.*?)\)/g, '').trim();
+          }
+
+          // Текст Плана действий
+          let planText = item.action_plan_text || '';
+          planText = planText.replace(/<[^>]*>/g, '').trim();
+
+          const responsible = item.action_plan_who || 'Не назначен';
+          const dueDate = item.action_plan_when || 'Не указана';
+          const categoryLabel = columnHeader ? `[${columnHeader}]` : '';
+
+          html += `        <tr>
+          <td>
+            <div style="margin-bottom: 10px;"><span class="item-number">${idx + 1}</span> <strong>${categoryLabel}</strong></div>
+            <div class="card-text"><strong>Карточка:</strong><br>${escapeHtml(cardText)}</div>
+            ${planText ? `<div class="plan-text"><strong>План действий:</strong><br>${escapeHtml(planText)}</div>` : ''}
+            <div class="responsible"><strong>Кому:</strong> ${escapeHtml(responsible)}</div>
+            <div class="due-date"><strong>Когда:</strong> ${escapeHtml(dueDate)}</div>
+          </td>
+          <td class="status-cell"><span class="status-todo">TO DO</span></td>
+          <td class="comment-cell"></td>
+        </tr>
+`;
+        });
+
+        if (discussionItems.length === 0) {
+          html += `        <tr>
+          <td colspan="3" style="text-align: center; padding: 40px; color: #999;">Нет планов действий для экспорта</td>
+        </tr>
+`;
+        }
+
+        html += `      </tbody>
+    </table>
+  </div>
+</body>
+</html>`;
+
+        const blob = new Blob([html], { type: 'text/html' });
+        downloadBlob(blob, `action-points.html`);
+      }
+
+      // Проверяем наличие html2canvas
+      if (typeof html2canvas === 'undefined') {
+        // Загружаем библиотеку html2canvas
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        script.onload = () => {
+          htmlToJpg(brainstormHtml, `brainstorm.jpg`);
+          setTimeout(() => htmlToJpg(discussionHtml, `discussion.jpg`), 1000);
+          setTimeout(() => generateActionPointsHtml(), 1500);
+          showToast('Экспорт JPG выполнен!', 'success');
+        };
+        script.onerror = () => {
+          showToast('Ошибка загрузки библиотеки html2canvas', 'danger');
+        };
+        document.head.appendChild(script);
+      } else {
+        htmlToJpg(brainstormHtml, `brainstorm.jpg`);
+        setTimeout(() => htmlToJpg(discussionHtml, `discussion.jpg`), 1000);
+        setTimeout(() => generateActionPointsHtml(), 1500);
+        showToast('Экспорт JPG выполнен!', 'success');
+      }
     }
 
     showToast('Экспорт выполнен!', 'success');
@@ -7151,7 +7866,9 @@ async function openSessionViewMode(sessionId) {
       exportMenu.style.zIndex = '1000';
       exportMenu.innerHTML = `
         <button class="btn btn-sm btn-link w-100 text-start" onclick="exportResults('pdf'); this.closest('div').remove();">PDF</button>
-        <button class="btn btn-sm btn-link w-100 text-start" onclick="exportResults('confluence'); this.closest('div').remove();">Confluence</button>
+        <button class="btn btn-sm btn-link w-100 text-start" onclick="exportResults('confluence'); this.closest('div').remove();">HTML</button>
+        <button class="btn btn-sm btn-link w-100 text-start" onclick="exportResults('confluence_multi'); this.closest('div').remove();">Confluence WIKI</button>
+        <button class="btn btn-sm btn-link w-100 text-start" onclick="exportResults('jpg'); this.closest('div').remove();">JPG</button>
       `;
       document.body.appendChild(exportMenu);
       setTimeout(() => exportMenu.remove(), 5000);
