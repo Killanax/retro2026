@@ -2072,7 +2072,7 @@ body {
     background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
     border-radius: var(--radius-lg);
     margin-top: 10px;
-    max-height: 300px;
+    max-height: 400px;
     overflow-y: auto;
     border: 1px solid #e2e8f0;
 }
@@ -2189,8 +2189,8 @@ body {
 }
 
 .meme-preview {
-    width: 100px;
-    height: 75px;
+    width: 140px;
+    height: 115px;
     object-fit: cover;
     border-radius: var(--radius-md);
     cursor: pointer;
