@@ -415,76 +415,267 @@
     </div>
   </div>
   
-  <!-- Модальное окно добавления идеи -->
-  <div class="modal fade" id="addItemModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">Добавить элемент</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <form id="add-item-form" onsubmit="event.preventDefault(); submitItem();">
-            <input type="hidden" id="item-category">
-            
-            <ul class="nav nav-tabs mb-3" role="tablist">
-              <li class="nav-item">
-                <button class="nav-link active" type="button" data-bs-toggle="tab" data-bs-target="#tab-text">
-                  <span class="material-icons">text_fields</span>
-                  Текст
-                </button>
-              </li>
-              <li class="nav-item">
-                <button class="nav-link" type="button" data-bs-toggle="tab" data-bs-target="#tab-emoji">
-                  <span class="material-icons">sentiment_satisfied</span>
-                  Смайлы
-                </button>
-              </li>
-            </ul>
-            
-            <div class="tab-content">
-              <div class="tab-pane fade show active" id="tab-text">
-                <div class="form-control" id="item-text" contenteditable="true" placeholder="Ваша идея..." style="min-height: 100px; overflow-y: auto;"></div>
+     <!-- Модальное окно добавления идеи -->
+        <div class="modal fade" id="addItemModal" tabindex="-1">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Добавить элемент</h5>
+                        <button
+                            type="button"
+                            class="btn-close"
+                            data-bs-dismiss="modal"
+                        ></button>
+                    </div>
+                    <div class="modal-body">
+                        <form
+                            id="add-item-form"
+                            onsubmit="
+                                event.preventDefault();
+                                submitItem();
+                            "
+                        >
+                            <input type="hidden" id="item-category" />
 
-                <!-- Быстрая вставка смайлов -->
-                <label class="form-label mt-2">Вставить смайл:</label>
-                <div class="emoji-picker-inline">
-                  <span class="emoji-btn" onclick="insertEmoji('👍', event)">👍</span>
-                  <span class="emoji-btn" onclick="insertEmoji('👎', event)">👎</span>
-                  <span class="emoji-btn" onclick="insertEmoji('✅', event)">✅</span>
-                  <span class="emoji-btn" onclick="insertEmoji('❌', event)">❌</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🎉', event)">🎉</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🔥', event)">🔥</span>
-                  <span class="emoji-btn" onclick="insertEmoji('💡', event)">💡</span>
-                  <span class="emoji-btn" onclick="insertEmoji('⭐', event)">⭐</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🚀', event)">🚀</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😄', event)">😄</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😢', event)">😢</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😡', event)">😡</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🤔', event)">🤔</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🎯', event)">🎯</span>
-                  <span class="emoji-btn" onclick="insertEmoji('💪', event)">💪</span>
-                  <span class="emoji-btn" onclick="insertEmoji('❤️', event)">❤️</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😍', event)">😍</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🤣', event)">🤣</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😮', event)">😮</span>
-                  <span class="emoji-btn" onclick="insertEmoji('😱', event)">😱</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🙄', event)">🙄</span>
-                  <span class="emoji-btn" onclick="insertEmoji('💩', event)">💩</span>
-                  <span class="emoji-btn" onclick="insertEmoji('🙏', event)">🙏</span>
-                  <span class="emoji-btn" onclick="insertEmoji('📈', event)">📈</span>
-                </div>
+                            <ul class="nav nav-tabs mb-3" role="tablist">
+                                <li class="nav-item">
+                                    <button
+                                        class="nav-link active"
+                                        type="button"
+                                        data-bs-toggle="tab"
+                                        data-bs-target="#tab-text"
+                                    >
+                                        <span class="material-icons"
+                                            >text_fields</span
+                                        >
+                                        Текст
+                                    </button>
+                                </li>
+                                <li class="nav-item">
+                                    <button
+                                        class="nav-link"
+                                        type="button"
+                                        data-bs-toggle="tab"
+                                        data-bs-target="#tab-emoji"
+                                    >
+                                        <span class="material-icons"
+                                            >sentiment_satisfied</span
+                                        >
+                                        Смайлы
+                                    </button>
+                                </li>
+                            </ul>
 
-                <!-- Быстрая вставка мемов -->
-                <label class="form-label mt-3">Вставить мем:</label>
-                <div class="meme-preview-container" id="text-tab-memes-container">
-                  <img src="https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh" class="meme-preview" onclick="insertMeme('https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh', 'Meme')" title="Meme" oncontextmenu="showMemeContextMenu(event, this.src, 'global')">
-                </div>
-                <button type="button" class="btn btn-primary btn-sm mt-2" onclick="openAddMemeModal()">
-                  <span class="material-icons" style="font-size: 16px; vertical-align: middle;">add</span>
-                  Добавить мем
-                </button>
-              </div>
+                            <div class="tab-content">
+                                <div
+                                    class="tab-pane fade show active"
+                                    id="tab-text"
+                                >
+                                    <div class="d-flex gap-3">
+                                        <div class="flex-grow-1">
+                                            <div
+                                                class="form-control"
+                                                id="item-text"
+                                                contenteditable="true"
+                                                placeholder="Ваша идея..."
+                                                style="
+                                                    min-height: 100px;
+                                                    overflow-y: auto;
+                                                "
+                                            ></div>
+
+                                            <!-- Быстрая вставка смайлов -->
+                                            <label class="form-label mt-2"
+                                                >Вставить смайл:</label
+                                            >
+                                            <div class="emoji-picker-inline">
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('👍', event)
+                                                    "
+                                                    >👍</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('👎', event)
+                                                    "
+                                                    >👎</span
+                                                >
+                                              <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('🎉', event)
+                                                    "
+                                                    >🎉</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('🔥', event)
+                                                    "
+                                                    >🔥</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('💡', event)
+                                                    "
+                                                    >💡</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('🚀', event)
+                                                    "
+                                                    >🚀</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('😄', event)
+                                                    "
+                                                    >😄</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('😢', event)
+                                                    "
+                                                    >😢</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('😡', event)
+                                                    "
+                                                    >😡</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('🤔', event)
+                                                    "
+                                                    >🤔</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('💪', event)
+                                                    "
+                                                    >💪</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('❤️', event)
+                                                    "
+                                                    >❤️</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('😍', event)
+                                                    "
+                                                    >😍</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('🤣', event)
+                                                    "
+                                                    >🤣</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('😮', event)
+                                                    "
+                                                    >😮</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('😱', event)
+                                                    "
+                                                    >😱</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('🙄', event)
+                                                    "
+                                                    >🙄</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('💩', event)
+                                                    "
+                                                    >💩</span
+                                                >
+                                                <span
+                                                    class="emoji-btn"
+                                                    onclick="
+                                                        insertEmoji('🙏', event)
+                                                    "
+                                                    >🙏</span
+                                                >
+                                            </div>
+                                        </div>
+
+                                        <!-- Быстрая вставка мемов (справа) -->
+                                        <div
+                                            style="
+                                                min-width: 300px;
+                                                max-width: 500px;
+                                            "
+                                        >
+                                            <label class="form-label"
+                                                >Вставить мем:</label
+                                            >
+                                            <div
+                                                class="meme-preview-container"
+                                                id="text-tab-memes-container"
+                                            >
+                                                <img
+                                                    src="https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh"
+                                                    class="meme-preview"
+                                                    onclick="
+                                                        insertMeme(
+                                                            'https://lh5.googleusercontent.com/avS6QMu-9IxfATwVoY96o2GHhDWX1Y_VmSV1YU7XgZ-RyOWaRXNoVvdy4mL65ngnY93chePJ5fGciB33wevXxfhnwhtvveg9TxYL54Vs7NTAOoOiBT1v69kZgMjjEvnXusZjqKCh',
+                                                            'Meme',
+                                                        )
+                                                    "
+                                                    title="Meme"
+                                                    oncontextmenu="
+                                                        showMemeContextMenu(
+                                                            event,
+                                                            this.src,
+                                                            'global',
+                                                        )
+                                                    "
+                                                />
+                                            </div>
+                                            <button
+                                                type="button"
+                                                class="btn btn-primary btn-sm mt-2 w-100"
+                                                onclick="openAddMemeModal()"
+                                            >
+                                                <span
+                                                    class="material-icons"
+                                                    style="
+                                                        font-size: 16px;
+                                                        vertical-align: middle;
+                                                    "
+                                                    >add</span
+                                                >
+                                                Добавить мем
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
 
               <div class="tab-pane fade" id="tab-emoji">
                 <label class="form-label">Выберите смайл:</label>
